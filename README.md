@@ -1,5 +1,7 @@
 # siftie.app
 
+Source: [github.com/dejankarin/siftie](https://github.com/dejankarin/siftie)
+
 A three-column research UI for **Siftie** — a chat-driven prompt-portfolio builder that turns brand sources (PDFs, URLs, pasted text, internal DB) into AI-engine-ready prompts. Built with Next.js (App Router) + React + TypeScript + Tailwind, deployed on Vercel at [siftie.app](https://siftie.app).
 
 ## Run the UI locally
