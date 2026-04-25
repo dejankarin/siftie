@@ -14,6 +14,8 @@
  */
 import 'server-only';
 import { listMessagesForResearches, type MessageRow } from './messages';
+import type { CouncilDepth } from './research/schema';
+import { listLatestRunsForResearches, type RunRow } from './runs';
 import { listSourcesForResearches, type SourceRow } from './sources';
 import { createServiceRoleSupabaseClient } from './supabase/server';
 
@@ -27,6 +29,11 @@ export interface WorkspaceResearch {
   id: string;
   projectId: string;
   name: string;
+  /**
+   * Composer dropdown choice for this research. Stored on the research
+   * row so refreshing the page doesn't reset it.
+   */
+  councilDepth: CouncilDepth;
   createdAt: number;
 }
 
@@ -45,6 +52,12 @@ export interface WorkspacePayload {
    * a synthetic intro bubble in that case.
    */
   messages: MessageRow[];
+  /**
+   * The most recent run per research (Session 6+). Hydrates the Prompts
+   * column on first paint so the user sees their last vetted portfolio
+   * without firing a separate request.
+   */
+  latestRuns: RunRow[];
 }
 
 const DEFAULT_PROJECT_NAME = 'My first project';
@@ -76,7 +89,7 @@ export async function fetchOrSeedWorkspace(clerkUserId: string): Promise<Workspa
   const projectIds = projects.map((p) => p.id);
   const { data: researches, error: researchesErr } = await supabase
     .from('researches')
-    .select('id, project_id, name, created_at')
+    .select('id, project_id, name, council_depth, created_at')
     .in('project_id', projectIds)
     .order('created_at', { ascending: true });
   if (researchesErr) throw researchesErr;
@@ -98,13 +111,14 @@ export async function fetchOrSeedWorkspace(clerkUserId: string): Promise<Workspa
     }
   }
 
-  // Hydrate sources + messages for every research in parallel (avoids
-  // N+1 fetches and runs both queries concurrently — they don't depend
-  // on each other so there's no reason to serialise them).
+  // Hydrate sources + messages + latest run per research in parallel
+  // (avoids N+1 fetches and three queries that don't depend on each
+  // other; no reason to serialise them).
   const researchIds = finalResearches.map((r) => r.id);
-  const [sources, messages] = await Promise.all([
+  const [sources, messages, latestRuns] = await Promise.all([
     listSourcesForResearches(researchIds),
     listMessagesForResearches(researchIds),
+    listLatestRunsForResearches(researchIds),
   ]);
 
   return {
@@ -117,10 +131,12 @@ export async function fetchOrSeedWorkspace(clerkUserId: string): Promise<Workspa
       id: r.id,
       projectId: r.project_id,
       name: r.name,
+      councilDepth: (r.council_depth ?? 'standard') as CouncilDepth,
       createdAt: new Date(r.created_at).getTime(),
     })),
     sources,
     messages,
+    latestRuns,
   };
 }
 
@@ -147,12 +163,14 @@ async function seedInitialWorkspace(clerkUserId: string): Promise<WorkspacePaylo
         id: research.id,
         projectId: research.project_id,
         name: research.name,
+        councilDepth: (research.council_depth ?? 'standard') as CouncilDepth,
         createdAt: new Date(research.created_at).getTime(),
       },
     ],
-    // Fresh user has no sources or messages yet — saves two round-trips.
+    // Fresh user has no sources, messages, or runs yet — saves three round-trips.
     sources: [],
     messages: [],
+    latestRuns: [],
   };
 }
 
@@ -161,7 +179,7 @@ async function insertResearch(projectId: string, name: string) {
   const { data, error } = await supabase
     .from('researches')
     .insert({ project_id: projectId, name })
-    .select('id, project_id, name, created_at')
+    .select('id, project_id, name, council_depth, created_at')
     .single();
   if (error || !data) throw error ?? new Error('Failed to seed research');
   return data;
@@ -193,6 +211,7 @@ export async function createProject(
       id: research.id,
       projectId: research.project_id,
       name: research.name,
+      councilDepth: (research.council_depth ?? 'standard') as CouncilDepth,
       createdAt: new Date(research.created_at).getTime(),
     },
   };
@@ -241,7 +260,59 @@ export async function createResearch(
     id: research.id,
     projectId: research.project_id,
     name: research.name,
+    councilDepth: (research.council_depth ?? 'standard') as CouncilDepth,
     createdAt: new Date(research.created_at).getTime(),
+  };
+}
+
+/**
+ * Update the council depth on a research. Idempotent — setting to the
+ * same value is a no-op (Postgres returns 0 affected rows but no
+ * error). Verifies ownership before writing.
+ */
+export async function setResearchCouncilDepth(
+  clerkUserId: string,
+  researchId: string,
+  depth: CouncilDepth,
+): Promise<void> {
+  await assertResearchOwner(clerkUserId, researchId);
+  const supabase = createServiceRoleSupabaseClient();
+  const { error } = await supabase
+    .from('researches')
+    .update({ council_depth: depth })
+    .eq('id', researchId);
+  if (error) throw error;
+}
+
+/**
+ * Read a research row + its parent project name, used by the research
+ * orchestrator to know what to title things. Verifies ownership.
+ */
+export async function getResearchWithContext(
+  clerkUserId: string,
+  researchId: string,
+): Promise<{ research: WorkspaceResearch; projectName: string }> {
+  await assertResearchOwner(clerkUserId, researchId);
+  const supabase = createServiceRoleSupabaseClient();
+  const { data, error } = await supabase
+    .from('researches')
+    .select(
+      'id, project_id, name, council_depth, created_at, projects!inner(name)',
+    )
+    .eq('id', researchId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new ForbiddenError('Research not found');
+  const project = (data as unknown as { projects: { name: string } }).projects;
+  return {
+    research: {
+      id: data.id as string,
+      projectId: data.project_id as string,
+      name: data.name as string,
+      councilDepth: ((data.council_depth ?? 'standard') as CouncilDepth),
+      createdAt: new Date(data.created_at as string).getTime(),
+    },
+    projectName: project?.name ?? '',
   };
 }
 

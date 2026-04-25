@@ -12,15 +12,33 @@ function ClusterDot({ cluster }: { cluster: PortfolioPrompt['cluster'] | 'All' }
   return <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: map[cluster] || 'gray' }}></span>;
 }
 
-function HitsBar({ hits }: { hits: number }) {
-  const cells = [0, 1, 2].map((i) => (
+/**
+ * Render N cells where the first `hits` are filled. Total comes from
+ * the latest run's `total_channels` (= number of Peec model channels).
+ * If Peec was skipped, both `hits` and `total` are 0 and we render
+ * 3 muted cells so the layout doesn't shift — the parent shows a
+ * banner explaining why.
+ *
+ * For very wide totals (>10) we cap visual cells to keep the row
+ * compact; the title attribute always shows the real count.
+ */
+function HitsBar({ hits, total }: { hits: number; total: number }) {
+  const visualTotal = total === 0 ? 3 : Math.min(total, 10);
+  const visualHits = total === 0 ? 0 : Math.round((hits / total) * visualTotal);
+  const cells = Array.from({ length: visualTotal }, (_, i) => (
     <span
       key={i}
-      className={`w-1.5 h-3.5 rounded-[2px] ${i < hits ? 'bg-[var(--accent)]' : 'bg-[var(--surface-3)]'}`}
+      className={`w-1.5 h-3.5 rounded-[2px] ${
+        i < visualHits ? 'bg-[var(--accent)]' : 'bg-[var(--surface-3)]'
+      }`}
     ></span>
   ));
+  const titleSuffix = total === 0 ? 'no live channels — add a Peec key for hit counts' : 'channels surfaced your brand';
   return (
-    <span className="flex items-end gap-[3px]" title={`${hits}/3 engines surfaced your brand`}>
+    <span
+      className="flex items-end gap-[3px]"
+      title={`${hits}/${total || 0} ${titleSuffix}`}
+    >
       {cells}
     </span>
   );
@@ -31,14 +49,18 @@ function PromptCard({
   onCopy,
   onTest,
   isNew,
+  totalChannels,
 }: {
   prompt: PortfolioPrompt;
   onCopy: (text: string) => void;
   onTest?: (p: PortfolioPrompt) => void;
   isNew: boolean;
+  /** Fallback when the prompt itself doesn't carry it (legacy rows). */
+  totalChannels: number;
 }) {
   const [copied, setCopied] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [showNote, setShowNote] = useState(false);
 
   const doCopy = (e: MouseEvent) => {
     e.stopPropagation();
@@ -53,6 +75,10 @@ function PromptCard({
     onTest?.(prompt);
   };
 
+  // Prefer the prompt's own totalChannels; fall back to the run-level
+  // value passed from the parent for older rows that pre-date this field.
+  const effectiveTotal = prompt.totalChannels ?? totalChannels;
+
   return (
     <div className={`src-card p-3.5 ${isNew ? 'anim-slide-up' : ''}`}>
       <div className="flex items-center justify-between gap-2 mb-2">
@@ -62,13 +88,39 @@ function PromptCard({
           <span className="text-[var(--ink-3)]">·</span>
           <span>{prompt.intent} intent</span>
         </div>
-        <HitsBar hits={prompt.hits} />
+        <HitsBar hits={prompt.hits} total={effectiveTotal} />
       </div>
       <p className="text-[13.5px] leading-[1.5] text-[var(--ink)]">
         <span className="text-[var(--ink-3)] font-mono text-[11px] mr-1.5">"</span>
         {prompt.text}
         <span className="text-[var(--ink-3)] font-mono text-[11px] ml-0.5">"</span>
       </p>
+      {/*
+        Council note disclosure — only renders when the Chair attached
+        a rationale (always for Session 6 runs; legacy/mock prompts
+        won't have one). Click to expand so the column stays compact
+        by default.
+      */}
+      {prompt.councilNote && (
+        <div className="mt-2.5">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowNote((v) => !v);
+            }}
+            className="text-[11px] text-[var(--ink-3)] hover:text-[var(--ink-2)] flex items-center gap-1"
+          >
+            <span>{showNote ? '−' : '+'}</span>
+            <span>Council rationale</span>
+          </button>
+          {showNote && (
+            <p className="mt-1.5 text-[12px] leading-[1.5] text-[var(--ink-2)] italic border-l-2 border-[var(--accent)] pl-2.5">
+              {prompt.councilNote}
+            </p>
+          )}
+        </div>
+      )}
       <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-[var(--line-2)]">
         <button
           type="button"
@@ -102,9 +154,25 @@ export interface PromptsColumnProps {
   newId: string | null;
   onGenerateMore: () => void;
   generating: boolean;
+  /**
+   * Total channels for the latest run (used as fallback when an
+   * individual prompt has no `totalChannels` field). 0 when Peec was
+   * skipped — the parent renders a banner about that.
+   */
+  totalChannels: number;
+  /** Latest run status; drives the "Working…" / "Failed" banner. */
+  runStatus: 'pending' | 'running' | 'complete' | 'failed' | null | undefined;
 }
 
-export function PromptsColumn({ prompts, onToast, newId, onGenerateMore, generating }: PromptsColumnProps) {
+export function PromptsColumn({
+  prompts,
+  onToast,
+  newId,
+  onGenerateMore,
+  generating,
+  totalChannels,
+  runStatus,
+}: PromptsColumnProps) {
   const [filter, setFilter] = useState<PromptFilter>('All');
   const [sort, setSort] = useState<'Cluster' | 'Intent' | 'Hits'>('Cluster');
 
@@ -129,7 +197,13 @@ export function PromptsColumn({ prompts, onToast, newId, onGenerateMore, generat
   }, [prompts]);
 
   const totalHits = prompts.reduce((s, p) => s + p.hits, 0);
-  const possible = prompts.length * 3;
+  // The "X / Y engine surfaces" headline scales with the actual
+  // number of channels Peec returned. When totalChannels is 0 (Peec
+  // skipped) we still want a non-zero denominator so the bar isn't
+  // a div-by-zero — fall back to 3 (matches the visual cell count
+  // and the legacy "ChatGPT · Perplexity · Claude" copy below).
+  const denominatorPerPrompt = totalChannels > 0 ? totalChannels : 3;
+  const possible = prompts.length * denominatorPerPrompt;
 
   const copy = (text: string) => {
     if (navigator.clipboard) void navigator.clipboard.writeText(text).catch(() => {});
@@ -158,7 +232,11 @@ export function PromptsColumn({ prompts, onToast, newId, onGenerateMore, generat
               <span className="text-[18px] font-serif tracking-tight text-[var(--ink)]">{totalHits}</span>
               <span className="text-[12px] text-[var(--ink-3)]">/ {possible} engine surfaces</span>
             </div>
-            <p className="text-[11px] text-[var(--ink-3)] mt-0.5">Across ChatGPT · Perplexity · Claude</p>
+            <p className="text-[11px] text-[var(--ink-3)] mt-0.5">
+              {totalChannels > 0
+                ? `Across ${totalChannels} live model channel${totalChannels === 1 ? '' : 's'}`
+                : 'Add a Peec key to see live brand-mention counts'}
+            </p>
           </div>
           <div className="flex items-end gap-[3px] h-7">
             {prompts.slice(0, 12).map((p, i) => (
@@ -170,6 +248,28 @@ export function PromptsColumn({ prompts, onToast, newId, onGenerateMore, generat
             ))}
           </div>
         </div>
+
+        {/*
+          Run status banner. Three modes:
+            - running/pending: spinner banner so the user knows the
+              Council is deliberating (chat messages explain the steps).
+            - failed:          muted banner pointing them at chat for the
+              specific failure message.
+            - default:         no banner.
+        */}
+        {(runStatus === 'running' || runStatus === 'pending') && (
+          <div className="mt-2 px-3 py-2 rounded-xl border border-[var(--accent-soft)] bg-[var(--accent-softer)] flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full border border-[var(--accent)] border-t-transparent animate-spin"></span>
+            <span className="text-[11.5px] text-[var(--accent-ink)]">
+              Council deliberating — chat shows live progress
+            </span>
+          </div>
+        )}
+        {runStatus === 'failed' && (
+          <div className="mt-2 px-3 py-2 rounded-xl border border-[var(--line)] bg-[var(--surface-2)] text-[11.5px] text-[var(--ink-2)]">
+            Last run failed — check the chat for details and retry.
+          </div>
+        )}
       </header>
 
       <div className="px-5 pb-2">
@@ -208,7 +308,13 @@ export function PromptsColumn({ prompts, onToast, newId, onGenerateMore, generat
 
       <div className="flex-1 min-h-0 scroll-y px-5 pb-3 space-y-2.5">
         {filtered.map((p) => (
-          <PromptCard key={p.id} prompt={p} onCopy={copy} isNew={p.id === newId} />
+          <PromptCard
+            key={p.id}
+            prompt={p}
+            onCopy={copy}
+            isNew={p.id === newId}
+            totalChannels={totalChannels}
+          />
         ))}
       </div>
 

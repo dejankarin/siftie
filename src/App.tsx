@@ -72,6 +72,15 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
   const pendingSource = useMemo(() => sources.find((s) => s.pending), [sources]);
   const analyzing = Boolean(pendingSource);
   const analyzingId = pendingSource?.id ?? null;
+  // Run research is allowed once the user has BOTH a source AND has
+  // sent at least one chat message (mirrors the server-side validation
+  // in startResearchRun → friendlier UX to gate at the button rather
+  // than show an error toast).
+  const hasUserMessage = useMemo(
+    () => messages.some((m) => m.role === 'user'),
+    [messages],
+  );
+  const canRunResearch = sources.length > 0 && hasUserMessage;
 
   // Reset transient UI state when switching research sessions.
   // `isTyping` is per-research inside `useWorkspace`, so it doesn't need
@@ -161,6 +170,35 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
     },
     [ws, showToast],
   );
+
+  const runResearch = useCallback(async () => {
+    showToast('Starting research…');
+    try {
+      await ws.runResearch();
+      showToast('Council is working');
+    } catch (err) {
+      const maybe = err as Error & { code?: string };
+      // Map server-side validation codes to friendly toasts. The
+      // first three are recoverable (user can fix in-app); the
+      // missing key codes deep-link to settings the same way
+      // sendMessage does so the user doesn't have to hunt.
+      switch (maybe.code) {
+        case 'no_sources':
+          showToast('Add at least one source first');
+          break;
+        case 'no_user_messages':
+          showToast('Send a chat message so I have your answers');
+          break;
+        case 'missing_gemini_key':
+        case 'missing_openrouter_key':
+          showToast(`Missing ${maybe.code === 'missing_gemini_key' ? 'Gemini' : 'OpenRouter'} key`);
+          window.location.href = '/settings/api-keys?onboarding=1';
+          break;
+        default:
+          showToast('Could not start research');
+      }
+    }
+  }, [ws, showToast]);
 
   const generateMore = () => {
     setGenerating(true);
@@ -261,6 +299,11 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                 isTyping={isTyping}
                 sourcesCount={sources.length}
                 analyzing={analyzing}
+                councilDepth={ws.activeResearch.councilDepth}
+                onCouncilDepthChange={ws.setCouncilDepth}
+                onRunResearch={runResearch}
+                runStatus={ws.activeResearch.runStatus}
+                canRun={canRunResearch}
               />
             </div>
             <div className="col-card overflow-hidden flex flex-col min-h-0">
@@ -271,6 +314,8 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                 newId={newPromptId}
                 onGenerateMore={generateMore}
                 generating={generating}
+                totalChannels={ws.activeResearch.latestTotalChannels ?? 0}
+                runStatus={ws.activeResearch.runStatus}
               />
             </div>
           </div>
@@ -305,6 +350,11 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                   isTyping={isTyping}
                   sourcesCount={sources.length}
                   analyzing={analyzing}
+                  councilDepth={ws.activeResearch.councilDepth}
+                  onCouncilDepthChange={ws.setCouncilDepth}
+                  onRunResearch={runResearch}
+                  runStatus={ws.activeResearch.runStatus}
+                  canRun={canRunResearch}
                 />
               </div>
             )}
@@ -317,6 +367,8 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                   newId={newPromptId}
                   onGenerateMore={generateMore}
                   generating={generating}
+                  totalChannels={ws.activeResearch.latestTotalChannels ?? 0}
+                  runStatus={ws.activeResearch.runStatus}
                 />
               </div>
             )}

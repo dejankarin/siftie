@@ -3,7 +3,16 @@ import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createBrowserSupabaseClient } from '../../lib/supabase/client';
 import { blankIntroMessage, createBlankResearch } from '../data/workspace';
-import type { ContextDoc, Message, Project, Research, Source, WorkspaceState } from '../types';
+import type {
+  ContextDoc,
+  CouncilDepth,
+  Message,
+  PortfolioPrompt,
+  Project,
+  Research,
+  Source,
+  WorkspaceState,
+} from '../types';
 
 /**
  * Workspace hook — Supabase edition.
@@ -80,9 +89,27 @@ interface ApiMessage {
   runId: string | null;
 }
 
+interface ApiRun {
+  id: string;
+  researchId: string;
+  status: 'pending' | 'running' | 'complete' | 'failed';
+  councilDepth: CouncilDepth;
+  prompts: PortfolioPrompt[];
+  totalChannels: number;
+  peecSkipped: boolean;
+  startedAt: number;
+  finishedAt: number | null;
+}
+
 interface ApiWorkspaceResponse {
   projects: { id: string; name: string; createdAt: number }[];
-  researches: { id: string; projectId: string; name: string; createdAt: number }[];
+  researches: {
+    id: string;
+    projectId: string;
+    name: string;
+    councilDepth: CouncilDepth;
+    createdAt: number;
+  }[];
   sources: ApiSource[];
   /**
    * Every persisted message for every research the user owns, ordered
@@ -90,6 +117,8 @@ interface ApiWorkspaceResponse {
    * researches — the UI swaps in a synthetic intro bubble in that case.
    */
   messages: ApiMessage[];
+  /** Latest run per research; drives the Prompts column on first paint. */
+  latestRuns: ApiRun[];
 }
 
 /**
@@ -143,6 +172,18 @@ export interface UseWorkspaceResult {
    * server failures so the caller can show a toast.
    */
   sendMessage: (text: string) => Promise<void>;
+  /**
+   * Update the Council depth on the active research. Optimistic +
+   * server-confirmed via PATCH /api/researches/{id}.
+   */
+  setCouncilDepth: (depth: CouncilDepth) => void;
+  /**
+   * Kick off a research run for the active research. Resolves once
+   * the server has accepted the request (HTTP 202). Throws on
+   * validation / server errors with `code` set to a stable short
+   * string the caller can branch on.
+   */
+  runResearch: () => Promise<void>;
   /**
    * True while the active research has an agent reply in flight. Drives
    * the typing-bubble in `<ChatColumn />`.
@@ -298,12 +339,18 @@ function hydrate(api: ApiWorkspaceResponse): WorkspaceState {
     messagesByResearch.set(m.researchId, existing);
   }
 
+  const latestRunByResearch = new Map<string, ApiRun>();
+  for (const run of api.latestRuns ?? []) {
+    latestRunByResearch.set(run.researchId, run);
+  }
+
   const researches: Research[] = api.researches.map((r) => {
     // Use server messages when present; otherwise fall back to the
     // synthetic intro bubble so brand-new researches don't render as a
     // sad empty pane. The intro is client-only and disappears as soon
     // as the user sends their first message (which inserts a real row).
     const serverMessages = messagesByResearch.get(r.id);
+    const run = latestRunByResearch.get(r.id);
     return {
       id: r.id,
       projectId: r.projectId,
@@ -311,7 +358,16 @@ function hydrate(api: ApiWorkspaceResponse): WorkspaceState {
       createdAt: r.createdAt,
       sources: sourcesByResearch.get(r.id) ?? [],
       messages: serverMessages && serverMessages.length > 0 ? serverMessages : [blankIntroMessage()],
-      prompts: [],
+      // Hydrate the persisted portfolio from the latest run (Session 6).
+      // For runs that completed we show the full prompt array; for
+      // running/failed/pending runs we leave prompts empty (the bar
+      // would be wrong) but still surface status so the UI can render
+      // a "Working…" / "Failed" indicator.
+      prompts: run && run.status === 'complete' ? run.prompts : [],
+      councilDepth: r.councilDepth,
+      runStatus: run?.status ?? null,
+      latestRunId: run?.id ?? null,
+      latestTotalChannels: run?.totalChannels ?? 0,
     };
   });
 
@@ -426,6 +482,10 @@ export function useWorkspace(): UseWorkspaceResult | null {
   // and append new rows to the right research. Skips rows whose id is
   // already in `seenMessageIdsRef`, which catches the common case where
   // the POST response added the row first.
+  //
+  // Also listens for INSERT/UPDATE on the `runs` table so the Prompts
+  // column reflects status flips (`running` → `complete`/`failed`) and
+  // the persisted prompts portfolio without a page reload.
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (!supabase) return;
@@ -433,6 +493,56 @@ export function useWorkspace(): UseWorkspaceResult | null {
     try {
       channel = supabase
         .channel('siftie-messages')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'runs' },
+          (payload) => {
+            // Postgres-changes payloads have `new` for INSERT/UPDATE
+            // and `old` for DELETE. Runs are never deleted by the app,
+            // so we only handle INSERT/UPDATE.
+            const row = payload.new as
+              | {
+                  id: string;
+                  research_id: string;
+                  status: 'pending' | 'running' | 'complete' | 'failed';
+                  council_depth: CouncilDepth;
+                  prompts: PortfolioPrompt[] | unknown;
+                  total_channels: number;
+                  peec_skipped: boolean;
+                }
+              | undefined;
+            if (!row?.id) return;
+            const safePrompts = Array.isArray(row.prompts)
+              ? (row.prompts as PortfolioPrompt[])
+              : [];
+            setState((s) => {
+              if (!s) return s;
+              return {
+                ...s,
+                researches: s.researches.map((r) => {
+                  if (r.id !== row.research_id) return r;
+                  // Only adopt this run's prompts if it's the latest
+                  // run for this research — guards against an
+                  // out-of-order UPDATE for an old run racing the new
+                  // one. We treat "newer than what we have" as
+                  // "matches latestRunId OR we have no run yet".
+                  const isLatest = r.latestRunId == null || r.latestRunId === row.id;
+                  return {
+                    ...r,
+                    runStatus: isLatest ? row.status : r.runStatus,
+                    latestRunId: isLatest ? row.id : r.latestRunId,
+                    latestTotalChannels: isLatest ? row.total_channels : r.latestTotalChannels,
+                    // Only swap the displayed portfolio when the run
+                    // completes — half-baked prompts arrays from a
+                    // mid-flight update would briefly empty the column.
+                    prompts:
+                      isLatest && row.status === 'complete' ? safePrompts : r.prompts,
+                  };
+                }),
+              };
+            });
+          },
+        )
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'messages' },
@@ -569,7 +679,13 @@ export function useWorkspace(): UseWorkspaceResult | null {
         if (!res.ok) throw new Error(`POST /api/projects failed (${res.status})`);
         const { project, research } = (await res.json()) as {
           project: { id: string; name: string; createdAt: number };
-          research: { id: string; projectId: string; name: string; createdAt: number };
+          research: {
+            id: string;
+            projectId: string;
+            name: string;
+            councilDepth: CouncilDepth;
+            createdAt: number;
+          };
         };
         setState((s) => {
           if (!s) return s;
@@ -585,6 +701,7 @@ export function useWorkspace(): UseWorkspaceResult | null {
                     projectId: research.projectId,
                     name: research.name,
                     createdAt: research.createdAt,
+                    councilDepth: research.councilDepth,
                   }
                 : r.projectId === tempId
                   ? { ...r, projectId: research.projectId }
@@ -672,7 +789,13 @@ export function useWorkspace(): UseWorkspaceResult | null {
         });
         if (!res.ok) throw new Error(`POST /api/researches failed (${res.status})`);
         const { research } = (await res.json()) as {
-          research: { id: string; projectId: string; name: string; createdAt: number };
+          research: {
+            id: string;
+            projectId: string;
+            name: string;
+            councilDepth: CouncilDepth;
+            createdAt: number;
+          };
         };
         setState((s) => {
           if (!s) return s;
@@ -686,6 +809,7 @@ export function useWorkspace(): UseWorkspaceResult | null {
                     projectId: research.projectId,
                     name: research.name,
                     createdAt: research.createdAt,
+                    councilDepth: research.councilDepth,
                   }
                 : r,
             ),
@@ -751,7 +875,13 @@ export function useWorkspace(): UseWorkspaceResult | null {
           });
           if (!res.ok) throw new Error(`POST /api/researches failed (${res.status})`);
           const { research } = (await res.json()) as {
-            research: { id: string; projectId: string; name: string; createdAt: number };
+            research: {
+              id: string;
+              projectId: string;
+              name: string;
+              councilDepth: CouncilDepth;
+              createdAt: number;
+            };
           };
           setState((s) => {
             if (!s) return s;
@@ -765,6 +895,7 @@ export function useWorkspace(): UseWorkspaceResult | null {
                       projectId: research.projectId,
                       name: research.name,
                       createdAt: research.createdAt,
+                      councilDepth: research.councilDepth,
                     }
                   : r,
               ),
@@ -1123,6 +1254,114 @@ export function useWorkspace(): UseWorkspaceResult | null {
     }
   }, []);
 
+  // -------------------------------------------------------------------------
+  // Research mutators (Session 6) — Council depth + run research.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Update the composer's "Council depth" dropdown for the active
+   * research. Optimistic: flips local state immediately, fires the
+   * PATCH in the background. On failure we just log — next reload
+   * pulls the truth from Supabase, so transient failures self-heal.
+   */
+  const setCouncilDepth = useCallback((depth: CouncilDepth) => {
+    const targetId = stateRef.current?.activeResearchId;
+    if (!targetId) return;
+    setState((s) =>
+      s
+        ? {
+            ...s,
+            researches: s.researches.map((r) =>
+              r.id === targetId ? { ...r, councilDepth: depth } : r,
+            ),
+          }
+        : s,
+    );
+    void fetch(`/api/researches/${targetId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ councilDepth: depth }),
+    }).catch((err) => console.error('[useWorkspace] setCouncilDepth failed:', err));
+  }, []);
+
+  /**
+   * Trigger a research run for the active research. POSTs
+   * `/api/research`, which returns 202 and continues the work in
+   * `waitUntil`. Council narration messages stream in via the existing
+   * Realtime channel; the runs subscription below flips
+   * `runStatus` to `complete`/`failed` and writes the final prompts.
+   *
+   * Throws an Error with `code` set to one of the server's known
+   * error codes (`no_sources`, `no_user_messages`, `missing_*_key`)
+   * so the caller can show a targeted toast.
+   */
+  const runResearch = useCallback(async (): Promise<void> => {
+    const targetId = stateRef.current?.activeResearchId;
+    if (!targetId) throw new Error('No active research');
+    // Optimistic indicator: flip to `pending` until the server's 202
+    // lands (which gives us the runId) and Realtime takes over.
+    setState((s) =>
+      s
+        ? {
+            ...s,
+            researches: s.researches.map((r) =>
+              r.id === targetId ? { ...r, runStatus: 'pending' } : r,
+            ),
+          }
+        : s,
+    );
+    try {
+      const res = await fetch('/api/research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ researchId: targetId }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        runId?: string;
+        reused?: boolean;
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok) {
+        // Roll back the indicator so the Run button comes back.
+        setState((s) =>
+          s
+            ? {
+                ...s,
+                researches: s.researches.map((r) =>
+                  r.id === targetId ? { ...r, runStatus: null } : r,
+                ),
+              }
+            : s,
+        );
+        const err: Error & { code?: string } = new Error(
+          body.message ?? `Run failed (${res.status})`,
+        );
+        err.code = body.error ?? 'unknown';
+        throw err;
+      }
+      // Bind the runId locally so we can match Realtime events. The
+      // server has now created the run row; flip indicator to
+      // `running`. The Realtime UPDATE handler below will move it to
+      // `complete` / `failed` when the orchestration finishes.
+      const runId = body.runId ?? null;
+      setState((s) =>
+        s
+          ? {
+              ...s,
+              researches: s.researches.map((r) =>
+                r.id === targetId ? { ...r, runStatus: 'running', latestRunId: runId } : r,
+              ),
+            }
+          : s,
+      );
+    } catch (err) {
+      // Re-throw so the caller can toast. State has already been
+      // rolled back above on the !res.ok branch.
+      throw err;
+    }
+  }, []);
+
   if (!state || !activeProject || !activeResearch) {
     return null;
   }
@@ -1146,6 +1385,8 @@ export function useWorkspace(): UseWorkspaceResult | null {
     removeSource,
     reindexSource,
     sendMessage,
+    setCouncilDepth,
+    runResearch,
     isTyping: pendingMessageResearchIds.has(state.activeResearchId),
   };
 }

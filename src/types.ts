@@ -69,9 +69,23 @@ export interface PortfolioPrompt {
   text: string;
   hits: number;
   intent: Intent;
+  /**
+   * Total number of "channels" the hit count is out of (e.g. number of
+   * Peec model channels). 0 when Peec was skipped — UI renders "0 / 0"
+   * and shows a banner. Set on every prompt by the orchestrator so
+   * the HitsBar doesn't need to look up the parent run.
+   */
+  totalChannels?: number;
+  /**
+   * Optional 1-2 sentence rationale from the Council Chair. Shown in
+   * the "Show all N" drawer so the user knows why each prompt made
+   * the cut.
+   */
+  councilNote?: string;
 }
 
 export type PromptFilter = 'All' | PromptCluster;
+export type CouncilDepth = 'quick' | 'standard';
 
 export interface Project {
   id: string;
@@ -87,6 +101,21 @@ export interface Research {
   sources: Source[];
   messages: Message[];
   prompts: PortfolioPrompt[];
+  /**
+   * Composer dropdown choice for the Council, persisted server-side
+   * on the research row. Defaults to 'standard' for new researches.
+   */
+  councilDepth: CouncilDepth;
+  /**
+   * Status of the latest research run, or null if the user has never
+   * clicked "Run research" on this research. Drives the
+   * "Working…" / "Failed" indicator near the Run button.
+   */
+  runStatus?: 'pending' | 'running' | 'complete' | 'failed' | null;
+  /** id of the latest run (or null). */
+  latestRunId?: string | null;
+  /** Total Peec channels for the latest run; used by HitsBar fallbacks. */
+  latestTotalChannels?: number;
 }
 
 export interface WorkspaceState {

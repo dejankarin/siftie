@@ -1,19 +1,54 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { Message } from '../types';
+import type { CouncilDepth, Message } from '../types';
+
+/**
+ * Pick the label + chip color for a council bubble. Reviewers are
+ * deliberately anonymised ("Reviewer 1") so users don't anchor on a
+ * favourite model — the Council's value is in the disagreement, not
+ * any one reviewer's identity. The Chair gets accent styling because
+ * it's the synthesised verdict the user should focus on.
+ */
+function councilLabel(msg: Message): { name: string; chip: string | null } {
+  if (msg.councilRole === 'reviewer' && msg.councilSeat) {
+    return { name: `Reviewer ${msg.councilSeat}`, chip: 'reviewer' };
+  }
+  if (msg.councilRole === 'chair') {
+    return { name: 'Chair', chip: 'chair' };
+  }
+  return { name: msg.role === 'agent' ? 'Siftie' : 'You', chip: null };
+}
 
 function MessageBubble({ msg }: { msg: Message }) {
   const isAgent = msg.role === 'agent';
+  const { name, chip } = councilLabel(msg);
   return (
     <div className={`${isAgent ? '' : 'flex justify-end'}`}>
       <div className={`flex-1 min-w-0 ${isAgent ? '' : 'flex flex-col items-end'}`}>
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-[12px] font-medium text-[var(--ink)]">{isAgent ? 'Siftie' : 'You'}</span>
+          <span className="text-[12px] font-medium text-[var(--ink)]">{name}</span>
+          {chip === 'reviewer' && (
+            <span className="px-1.5 py-[1px] rounded-full text-[10px] font-medium uppercase tracking-wide bg-[var(--surface-3)] text-[var(--ink-3)]">
+              Council
+            </span>
+          )}
+          {chip === 'chair' && (
+            <span className="px-1.5 py-[1px] rounded-full text-[10px] font-medium uppercase tracking-wide bg-[var(--accent-soft)] text-[var(--accent-ink)]">
+              Chair
+            </span>
+          )}
           <span className="text-[11px] text-[var(--ink-3)]">{msg.time}</span>
         </div>
         <div
           className={
             isAgent
-              ? 'max-w-[92%] text-[14px] leading-[1.6] text-[var(--ink)]'
+              ? `max-w-[92%] text-[14px] leading-[1.6] text-[var(--ink)] ${
+                  chip
+                    ? 'border-l-2 pl-3 ' +
+                      (chip === 'chair'
+                        ? 'border-[var(--accent)]'
+                        : 'border-[var(--line-strong)]')
+                    : ''
+                }`
               : 'max-w-[88%] text-[14px] leading-[1.55] text-[var(--ink)] bg-[var(--surface-2)] border border-[var(--line)] rounded-2xl rounded-tr-md px-3.5 py-2.5'
           }
         >
@@ -62,11 +97,36 @@ export interface ChatColumnProps {
   isTyping: boolean;
   sourcesCount: number;
   analyzing: boolean;
+  /**
+   * Session 6: Council depth dropdown (Quick = 3 reviewers,
+   * Standard = 4 reviewers). Persisted on the research row server-side.
+   */
+  councilDepth: CouncilDepth;
+  onCouncilDepthChange: (depth: CouncilDepth) => void;
+  /**
+   * Session 6: triggers a research run. Disabled when a run is
+   * already pending/running so the user can't double-fire.
+   */
+  onRunResearch: () => void;
+  runStatus: 'pending' | 'running' | 'complete' | 'failed' | null | undefined;
+  /** Disable Run if the user hasn't sent any messages or added sources yet. */
+  canRun: boolean;
 }
 
 const SESSION_DATE = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date());
 
-export function ChatColumn({ messages, onSend, isTyping, sourcesCount, analyzing }: ChatColumnProps) {
+export function ChatColumn({
+  messages,
+  onSend,
+  isTyping,
+  sourcesCount,
+  analyzing,
+  councilDepth,
+  onCouncilDepthChange,
+  onRunResearch,
+  runStatus,
+  canRun,
+}: ChatColumnProps) {
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -170,8 +230,86 @@ export function ChatColumn({ messages, onSend, isTyping, sourcesCount, analyzing
             </button>
           </div>
         </div>
+
+        {/*
+          Council bar: depth selector + Run button. Lives outside the
+          textarea card so users see it as a separate "kick off the
+          big LLM run" affordance rather than a hidden settings flag.
+        */}
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <label className="flex items-center gap-1.5 text-[11.5px] text-[var(--ink-3)]">
+            <span>Council</span>
+            <select
+              value={councilDepth}
+              onChange={(e) => onCouncilDepthChange(e.target.value as CouncilDepth)}
+              disabled={runStatus === 'running' || runStatus === 'pending'}
+              className="appearance-none pill bg-[var(--surface)] text-[11.5px] text-[var(--ink-2)] pl-2 pr-2.5 py-0.5 cursor-pointer disabled:opacity-50"
+              aria-label="Council depth"
+            >
+              <option value="quick">Quick · 3 reviewers</option>
+              <option value="standard">Standard · 4 reviewers</option>
+            </select>
+          </label>
+          <RunResearchButton
+            onClick={onRunResearch}
+            status={runStatus}
+            disabled={!canRun}
+          />
+        </div>
         <p className="text-center mt-2 text-[10.5px] text-[var(--ink-3)]">Siftie uses your sources as the only context. Replies cite source IDs.</p>
       </div>
     </section>
+  );
+}
+
+/**
+ * The Run research button is its own component because it has 4 visual
+ * states (idle, pending/running, failed, disabled) and inlining the
+ * branching logic would make the composer hard to read.
+ *
+ *   - `disabled` (no sources or no chat messages) → muted + tooltip
+ *   - `pending` / `running` → spinner + "Working…" disabled
+ *   - `failed` → red "Retry" pill (still clickable)
+ *   - `complete` / null → primary "Run research" pill
+ */
+function RunResearchButton({
+  onClick,
+  status,
+  disabled,
+}: {
+  onClick: () => void;
+  status: 'pending' | 'running' | 'complete' | 'failed' | null | undefined;
+  disabled: boolean;
+}) {
+  const busy = status === 'pending' || status === 'running';
+  const failed = status === 'failed';
+  const label = busy ? 'Working…' : failed ? 'Retry research' : 'Run research';
+  const isDisabled = disabled || busy;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={isDisabled}
+      title={
+        disabled
+          ? 'Add at least one source and send a chat message first.'
+          : busy
+            ? 'A run is already in flight'
+            : 'Generate a fresh prompt portfolio with the Council'
+      }
+      className={`rounded-full px-3.5 h-8 text-[12px] font-medium transition flex items-center gap-1.5
+        ${
+          isDisabled
+            ? 'bg-[var(--btn-disabled-bg)] text-[var(--btn-disabled-fg)] cursor-not-allowed'
+            : failed
+              ? 'border border-[var(--line)] bg-[var(--surface)] text-[var(--ink)] hover:border-[var(--accent)]'
+              : 'bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] hover:bg-[var(--btn-primary-hover)]'
+        }`}
+    >
+      {busy && (
+        <span className="w-3 h-3 rounded-full border border-current border-t-transparent animate-spin"></span>
+      )}
+      {label}
+    </button>
   );
 }

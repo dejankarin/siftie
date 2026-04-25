@@ -34,6 +34,10 @@ export function createBlankResearch(projectId: string, name: string): Research {
     sources: [],
     messages: [blankIntroMessage()],
     prompts: [],
+    councilDepth: 'standard',
+    runStatus: null,
+    latestRunId: null,
+    latestTotalChannels: 0,
   };
 }
 
@@ -51,6 +55,10 @@ export function seedWorkspace(): WorkspaceState {
         sources: INITIAL_SOURCES,
         messages: INITIAL_MESSAGES,
         prompts: INITIAL_PROMPTS,
+        councilDepth: 'standard',
+        runStatus: null,
+        latestRunId: null,
+        latestTotalChannels: 0,
       },
     ],
     activeProjectId: projectId,
