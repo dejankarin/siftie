@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createBlankResearch, seedWorkspace, uid } from '../data/workspace';
-import type { Project, Research, WorkspaceState } from '../types';
+import type { Project, Research, SourceType, WorkspaceState } from '../types';
 
 const STORAGE_KEY = 'siftie.workspace.v1';
+const SOURCE_TYPES = new Set<SourceType>(['pdf', 'url', 'doc', 'md']);
 
 function isValidWorkspace(value: unknown): value is WorkspaceState {
   if (!value || typeof value !== 'object') return false;
@@ -31,7 +32,7 @@ function loadWorkspace(): WorkspaceState {
 function heal(state: WorkspaceState): WorkspaceState {
   if (state.projects.length === 0) return seedWorkspace();
   const projectIds = new Set(state.projects.map((p) => p.id));
-  const researches = state.researches.filter((r) => projectIds.has(r.projectId));
+  const researches = state.researches.filter((r) => projectIds.has(r.projectId)).map(normalizeResearch);
   let activeProjectId = projectIds.has(state.activeProjectId) ? state.activeProjectId : state.projects[0]!.id;
   let researchesInActive = researches.filter((r) => r.projectId === activeProjectId);
   let next = researches;
@@ -42,6 +43,18 @@ function heal(state: WorkspaceState): WorkspaceState {
   }
   const activeResearchId = researchesInActive.find((r) => r.id === state.activeResearchId)?.id ?? researchesInActive[0]!.id;
   return { projects: state.projects, researches: next, activeProjectId, activeResearchId };
+}
+
+function normalizeResearch(research: Research): Research {
+  return {
+    ...research,
+    sources: research.sources.map((source) => {
+      const sourceType = source.type as string;
+      if (sourceType === 'paste') return { ...source, type: 'doc' };
+      if (sourceType === 'db') return { ...source, type: 'md' };
+      return { ...source, type: SOURCE_TYPES.has(source.type) ? source.type : 'pdf' };
+    }),
+  };
 }
 
 export interface UseWorkspaceResult {

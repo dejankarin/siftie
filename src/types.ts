@@ -1,4 +1,4 @@
-export type SourceType = 'pdf' | 'url' | 'paste' | 'db';
+export type SourceType = 'pdf' | 'url' | 'doc' | 'md';
 
 export interface Source {
   id: string;

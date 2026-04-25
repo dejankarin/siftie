@@ -15,8 +15,6 @@ export function TopBar({ theme, onToggleTheme }: TopBarProps) {
     <header className="hidden md:flex items-center justify-between px-6 py-3 border-b border-[var(--line)] bg-[var(--bg)]/80 backdrop-blur sticky top-0 z-20">
       <div className="flex items-center gap-3">
         <img src={logo} alt="Siftie" style={{ height: '18px', width: 'auto' }} />
-        <span className="w-px h-4 bg-[var(--line)]"></span>
-        <span className="text-[12px] text-[var(--ink-3)]">Loftway · SS26 launch portfolio</span>
       </div>
       <div className="flex items-center gap-1.5">
         <button type="button" className="btn-ghost px-2.5 py-1.5 text-[12.5px] text-[var(--ink-2)]">
@@ -25,11 +23,14 @@ export function TopBar({ theme, onToggleTheme }: TopBarProps) {
         <span className="w-px h-5 bg-[var(--line)] mx-1"></span>
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <span className="w-px h-5 bg-[var(--line)] mx-1"></span>
-        <button type="button" className="btn-ghost px-2.5 py-1.5 text-[12.5px] text-[var(--ink-2)]">
-          Share
-        </button>
-        <button type="button" className="btn-primary px-3 py-1.5 text-[12.5px]">
-          New session
+        <button
+          type="button"
+          className="btn-ghost w-8 h-8 p-0 rounded-full flex items-center justify-center"
+          aria-label="User account"
+        >
+          <span className="w-7 h-7 rounded-full bg-[var(--surface-3)] text-[var(--ink-2)] text-[10.5px] font-semibold flex items-center justify-center overflow-hidden">
+            EM
+          </span>
         </button>
       </div>
     </header>

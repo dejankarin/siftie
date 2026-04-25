@@ -114,10 +114,10 @@ function AddMenu({ onPick }: { onPick: (tab: AddTab) => void }) {
   }, [open]);
 
   const items: { id: AddTab; label: string; hint: string }[] = [
-    { id: 'upload', label: 'Upload file', hint: 'PDF, DOCX, TXT, MD' },
+    { id: 'pdf', label: 'Upload PDF', hint: 'Research decks, reports, briefs' },
     { id: 'url', label: 'Paste URL', hint: 'Site, article, brand' },
-    { id: 'text', label: 'Paste text', hint: 'Notes, transcripts' },
-    { id: 'db', label: 'Search database', hint: 'Internal index' },
+    { id: 'doc', label: 'Upload Word doc', hint: 'DOC or DOCX files' },
+    { id: 'md', label: 'Upload .md', hint: 'Markdown notes or docs' },
   ];
 
   return (
@@ -305,7 +305,7 @@ export interface SourcesColumnProps {
   onRenameConsumed?: () => void;
 }
 
-const TYPE_ORDER: Record<Source['type'], number> = { pdf: 0, url: 1, paste: 2, db: 3 };
+const TYPE_ORDER: Record<Source['type'], number> = { pdf: 0, url: 1, doc: 2, md: 3 };
 
 function getInitialView(): ViewMode {
   if (typeof window === 'undefined') return 'detailed';
@@ -442,11 +442,6 @@ export function SourcesColumn({
           </div>
           <AddMenu onPick={onAdd} />
         </div>
-        <p className="mt-1 text-[12px] text-[var(--ink-3)] leading-snug">
-          {sources.length === 0
-            ? 'Add the contents below to start this research.'
-            : `${sources.length} ${sources.length === 1 ? 'source' : 'sources'} feeding the agent.`}
-        </p>
       </header>
 
       <div className="px-5 pb-2.5 space-y-2">
@@ -501,7 +496,7 @@ export function SourcesColumn({
             </p>
             <button
               type="button"
-              onClick={() => onAdd('upload')}
+              onClick={() => onAdd('pdf')}
               className="btn-primary mt-3 inline-flex items-center gap-1.5 px-3 h-8 text-[12.5px] font-medium"
             >
               <PlusIcon />

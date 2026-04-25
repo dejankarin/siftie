@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import type { Source } from '../types';
 
 type NewSourcePayload = Omit<Source, 'id'>;
-type AddTab = 'upload' | 'url' | 'text' | 'db';
+type AddTab = 'pdf' | 'url' | 'doc' | 'md';
 
 interface AddSourceModalProps {
   open: boolean;
@@ -11,11 +11,10 @@ interface AddSourceModalProps {
   onAdd: (payload: NewSourcePayload) => void;
 }
 
-export function AddSourceModal({ open, initialTab = 'upload', onClose, onAdd }: AddSourceModalProps) {
+export function AddSourceModal({ open, initialTab = 'pdf', onClose, onAdd }: AddSourceModalProps) {
   const [tab, setTab] = useState<AddTab>(initialTab);
   const [url, setUrl] = useState('');
   const [text, setText] = useState('');
-  const [query, setQuery] = useState('');
   const [dropping, setDropping] = useState(false);
 
   useEffect(() => {
@@ -24,7 +23,6 @@ export function AddSourceModal({ open, initialTab = 'upload', onClose, onAdd }: 
     } else {
       setUrl('');
       setText('');
-      setQuery('');
     }
   }, [open, initialTab]);
 
@@ -33,7 +31,7 @@ export function AddSourceModal({ open, initialTab = 'upload', onClose, onAdd }: 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
     let payload: NewSourcePayload | null = null;
-    if (tab === 'upload')
+    if (tab === 'pdf')
       payload = {
         type: 'pdf',
         title: 'Competitor_Teardown_Q1.pdf',
@@ -49,24 +47,27 @@ export function AddSourceModal({ open, initialTab = 'upload', onClose, onAdd }: 
         snippet:
           'Page indexed. Headings, body copy, and meta extracted. Page contains 1,240 words across 4 sections.',
       };
-    if (tab === 'text' && text.trim()) {
+    if (tab === 'doc')
+      payload = {
+        type: 'doc',
+        title: 'Customer_Interview_Notes.docx',
+        meta: '1,840 words · just now',
+        snippet:
+          'Interview notes covering buyer objections, sustainability language, pricing reactions, and competitor comparisons.',
+      };
+    if (tab === 'md') {
       const t = text.trim();
       const words = t.split(/\s+/).filter(Boolean).length;
       payload = {
-        type: 'paste',
-        title: 'Pasted text',
-        meta: `${words} words · just now`,
-        snippet: t.slice(0, 200) + (t.length > 200 ? '…' : ''),
+        type: 'md',
+        title: 'Research_notes.md',
+        meta: `${words || 420} words · just now`,
+        snippet:
+          t.slice(0, 200) +
+            (t.length > 200 ? '…' : '') ||
+          'Markdown notes indexed for this research, including audience, category, and competitor observations.',
       };
     }
-    if (tab === 'db' && query.trim())
-      payload = {
-        type: 'db',
-        title: `DB result — "${query.trim()}"`,
-        meta: 'Internal database · 6 matches',
-        snippet:
-          'Returned 6 records from the activewear AEO benchmark. Top match: "Sustainable running brands" — 247 query variants.',
-      };
     if (payload) {
       onAdd(payload);
       onClose();
@@ -74,14 +75,13 @@ export function AddSourceModal({ open, initialTab = 'upload', onClose, onAdd }: 
   };
 
   const tabs: { id: AddTab; label: string }[] = [
-    { id: 'upload', label: 'Upload' },
+    { id: 'pdf', label: 'PDF' },
     { id: 'url', label: 'URL' },
-    { id: 'text', label: 'Paste text' },
-    { id: 'db', label: 'Database' },
+    { id: 'doc', label: 'Word doc' },
+    { id: 'md', label: '.md' },
   ];
 
-  const canSubmit =
-    tab === 'upload' || (tab === 'url' && url.trim()) || (tab === 'text' && text.trim()) || (tab === 'db' && query.trim());
+  const canSubmit = tab === 'pdf' || (tab === 'url' && url.trim()) || tab === 'doc' || tab === 'md';
 
   return (
     <div
@@ -129,7 +129,7 @@ export function AddSourceModal({ open, initialTab = 'upload', onClose, onAdd }: 
           ))}
         </div>
         <div className="p-5">
-          {tab === 'upload' && (
+          {tab === 'pdf' && (
             <div
               onDragOver={(e) => {
                 e.preventDefault();
@@ -147,8 +147,8 @@ export function AddSourceModal({ open, initialTab = 'upload', onClose, onAdd }: 
                     : 'border-[var(--line)] bg-[var(--surface-2)]'
                 }`}
             >
-              <p className="text-[13.5px] font-medium text-[var(--ink)]">Drop a file, or click to browse</p>
-              <p className="text-[11.5px] text-[var(--ink-3)] mt-1">PDF, DOCX, TXT, MD — up to 50 MB</p>
+              <p className="text-[13.5px] font-medium text-[var(--ink)]">Drop a PDF, or click to browse</p>
+              <p className="text-[11.5px] text-[var(--ink-3)] mt-1">PDF files up to 50 MB</p>
             </div>
           )}
           {tab === 'url' && (
@@ -163,39 +163,38 @@ export function AddSourceModal({ open, initialTab = 'upload', onClose, onAdd }: 
               <p className="text-[11.5px] text-[var(--ink-3)] mt-2">Paste a competitor page, review article, or your own brand site.</p>
             </div>
           )}
-          {tab === 'text' && (
+          {tab === 'doc' && (
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDropping(true);
+              }}
+              onDragLeave={() => setDropping(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDropping(false);
+              }}
+              className={`rounded-xl border-2 border-dashed py-10 text-center transition
+                ${
+                  dropping
+                    ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+                    : 'border-[var(--line)] bg-[var(--surface-2)]'
+                }`}
+            >
+              <p className="text-[13.5px] font-medium text-[var(--ink)]">Drop a Word document, or click to browse</p>
+              <p className="text-[11.5px] text-[var(--ink-3)] mt-1">DOC or DOCX files up to 50 MB</p>
+            </div>
+          )}
+          {tab === 'md' && (
             <div>
-              <label className="text-[11.5px] uppercase tracking-wider text-[var(--ink-3)] font-medium">Text</label>
+              <label className="text-[11.5px] uppercase tracking-wider text-[var(--ink-3)] font-medium">Markdown</label>
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 rows={6}
-                placeholder="Paste a customer interview transcript, brand brief, or notes…"
+                placeholder="Paste markdown notes, or leave blank to add a placeholder .md source…"
                 className="mt-1 w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-[14px] leading-[1.55] focus-ring text-[var(--ink)] placeholder:text-[var(--ink-3)] resize-none"
               />
-            </div>
-          )}
-          {tab === 'db' && (
-            <div>
-              <label className="text-[11.5px] uppercase tracking-wider text-[var(--ink-3)] font-medium">Search internal database</label>
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="e.g. sustainable activewear, recycled textiles, DTC pricing"
-                className="mt-1 w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-[14px] focus-ring text-[var(--ink)] placeholder:text-[var(--ink-3)]"
-              />
-              <div className="mt-3 space-y-1.5">
-                {['Activewear AEO benchmark', 'Sustainability claim audit', 'DTC challenger pricing'].map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setQuery(s)}
-                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-[var(--surface-2)] text-[12.5px] text-[var(--ink-2)]"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
             </div>
           )}
         </div>

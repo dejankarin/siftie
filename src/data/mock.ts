@@ -19,17 +19,17 @@ export const INITIAL_SOURCES: Source[] = [
   },
   {
     id: 's3',
-    type: 'paste',
-    title: 'Pasted: Q1 customer interview transcript',
-    meta: '1,840 words · pasted 8 min ago',
+    type: 'doc',
+    title: 'Q1 customer interview transcript.docx',
+    meta: '1,840 words · uploaded 8 min ago',
     snippet:
       '"I asked ChatGPT for sustainable running shorts under $80 and it just gave me Patagonia and Girlfriend Collective. I\'d never heard of half the brands my friends actually wear."',
   },
   {
     id: 's4',
-    type: 'db',
-    title: 'AEO Benchmark — Activewear Category',
-    meta: 'Internal database · 1.2k queries',
+    type: 'md',
+    title: 'AEO Benchmark — Activewear Category.md',
+    meta: '1.2k query notes · uploaded 12 min ago',
     snippet:
       'Across 1,247 buyer-intent prompts in activewear, 6 brands captured 71% of mentions. Long-tail challengers appeared in <4% of "best for…" queries.',
   },
@@ -97,6 +97,6 @@ export const SOURCE_TYPES: Record<
 > = {
   pdf: { label: 'PDF', dot: 'oklch(62% 0.14 25)' },
   url: { label: 'URL', dot: 'oklch(60% 0.10 240)' },
-  paste: { label: 'Pasted', dot: 'oklch(60% 0.10 150)' },
-  db: { label: 'Database', dot: 'oklch(55% 0.10 300)' },
+  doc: { label: 'Word doc', dot: 'oklch(60% 0.10 150)' },
+  md: { label: '.md', dot: 'oklch(55% 0.10 300)' },
 };

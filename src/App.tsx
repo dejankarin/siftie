@@ -25,7 +25,7 @@ export default function App() {
 
   const [tab, setTab] = useState<MobileTab>('chat');
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalInitialTab, setModalInitialTab] = useState<AddTab>('upload');
+  const [modalInitialTab, setModalInitialTab] = useState<AddTab>('pdf');
   const [editingSource, setEditingSource] = useState<Source | null>(null);
   const [toast, setToast] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -73,7 +73,7 @@ export default function App() {
   );
 
   const openAdd = useCallback((initial?: AddTab) => {
-    setModalInitialTab(initial ?? 'upload');
+    setModalInitialTab(initial ?? 'pdf');
     setModalOpen(true);
   }, []);
 

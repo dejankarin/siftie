@@ -1,39 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { Message } from '../types';
 
-function AgentAvatar({ size = 28 }: { size?: number }) {
-  return (
-    <div
-      className="rounded-full flex items-center justify-center shrink-0 font-serif italic"
-      style={{
-        width: size,
-        height: size,
-        background: 'var(--accent-soft)',
-        color: 'var(--accent-ink)',
-        fontSize: size * 0.5,
-      }}
-    >
-      æ
-    </div>
-  );
-}
-
-function UserAvatar({ size = 28 }: { size?: number }) {
-  return (
-    <div
-      className="rounded-full flex items-center justify-center shrink-0 bg-[var(--surface-3)] text-[var(--ink-2)] text-[11px] font-semibold"
-      style={{ width: size, height: size }}
-    >
-      EM
-    </div>
-  );
-}
-
 function MessageBubble({ msg }: { msg: Message }) {
   const isAgent = msg.role === 'agent';
   return (
-    <div className={`flex gap-3 ${isAgent ? '' : 'flex-row-reverse'}`}>
-      {isAgent ? <AgentAvatar /> : <UserAvatar />}
+    <div className={`${isAgent ? '' : 'flex justify-end'}`}>
       <div className={`flex-1 min-w-0 ${isAgent ? '' : 'flex flex-col items-end'}`}>
         <div className="flex items-center gap-2 mb-1">
           <span className="text-[12px] font-medium text-[var(--ink)]">{isAgent ? 'Siftie' : 'You'}</span>
@@ -55,8 +26,7 @@ function MessageBubble({ msg }: { msg: Message }) {
 
 function TypingBubble() {
   return (
-    <div className="flex gap-3">
-      <AgentAvatar />
+    <div className="flex">
       <div className="flex items-center gap-1.5 px-3.5 py-3 rounded-2xl rounded-tl-md bg-[var(--surface-2)] border border-[var(--line)]">
         <span className="typing-dot w-1.5 h-1.5 rounded-full bg-[var(--ink-3)]"></span>
         <span className="typing-dot w-1.5 h-1.5 rounded-full bg-[var(--ink-3)]"></span>
@@ -132,14 +102,9 @@ export function ChatColumn({ messages, onSend, isTyping, sourcesCount, analyzing
       <header className="px-5 pt-5 pb-3 border-b border-[var(--line-2)]">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <AgentAvatar size={34} />
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-[15px] font-semibold tracking-tight text-[var(--ink)]">Siftie</h2>
-                <span className="chip bg-[var(--accent-soft)] text-[var(--accent-ink)]">Research</span>
-              </div>
+              <h2 className="text-[15px] font-semibold tracking-tight text-[var(--ink)]">Siftie</h2>
               <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)]"></span>
                 <span className="text-[11.5px] text-[var(--ink-3)]">Active · analyzing {sourcesCount} sources</span>
               </div>
             </div>
