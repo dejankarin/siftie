@@ -13,3 +13,8 @@ dist
 
 Logo/
 logo/
+!public/logo/
+!public/logo/*.svg
+
+# clerk configuration (can include secrets)
+/.clerk/

@@ -2,8 +2,8 @@ import { UserButton } from '@clerk/nextjs';
 import type { Theme } from '../hooks/useTheme';
 import { ThemeToggle } from './ThemeToggle';
 
-const LIGHT_LOGO = '/assets/Siftie-logo-light.svg';
-const DARK_LOGO = '/assets/Siftie-logo-dark.svg';
+const LIGHT_LOGO = '/logo/Siftie-logo-light.svg';
+const DARK_LOGO = '/logo/Siftie-logo-dark.svg';
 
 interface TopBarProps {
   theme: Theme;

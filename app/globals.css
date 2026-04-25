@@ -27,6 +27,7 @@
     /* Accent (sky) */
     --accent: #0ea5e9;
     --accent-ink: #0369a1;
+    --accent-fg: #ffffff;
     --accent-soft: #e0f2fe;
     --accent-softer: #f0f9ff;
     --focus-ring: #bae6fd;
@@ -70,6 +71,7 @@
 
     --accent: #38bdf8;
     --accent-ink: #7dd3fc;
+    --accent-fg: #0b0f14;
     --accent-soft: oklch(30% 0.06 240);
     --accent-softer: oklch(24% 0.04 240);
     --focus-ring: #1e3a5f;
@@ -116,6 +118,15 @@
   }
   .font-mono {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  .theme-logo-dark {
+    display: none;
+  }
+  [data-theme='dark'] .theme-logo-light {
+    display: none;
+  }
+  [data-theme='dark'] .theme-logo-dark {
+    display: block;
   }
   .col-card {
     background: var(--surface);
