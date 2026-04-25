@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AddSourceModal, type AddTab } from './components/AddSourceModal';
 import { ChatColumn } from './components/ChatColumn';
 import { EditSourceModal } from './components/EditSourceModal';
@@ -13,7 +13,7 @@ import { Toast } from './components/Toast';
 import { TopBar } from './components/TopBar';
 import { useTheme } from './hooks/useTheme';
 import { useIsDesktop } from './hooks/useViewport';
-import { useWorkspace, type UseWorkspaceResult } from './hooks/useWorkspace';
+import { useWorkspace, type AddSourcePayload, type UseWorkspaceResult } from './hooks/useWorkspace';
 import type { Message, PortfolioPrompt, Source } from './types';
 
 type MobileTab = 'sources' | 'chat' | 'prompts';
@@ -49,8 +49,6 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
   const [editingSource, setEditingSource] = useState<Source | null>(null);
   const [toast, setToast] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [newPromptId, setNewPromptId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [pendingRenameId, setPendingRenameId] = useState<string | null>(null);
@@ -68,46 +66,70 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
     };
   }, []);
 
+  const sources = ws.activeResearch.sources;
+  const messages = ws.activeResearch.messages;
+  const prompts = ws.activeResearch.prompts;
+  const pendingSource = useMemo(() => sources.find((s) => s.pending), [sources]);
+  const analyzing = Boolean(pendingSource);
+  const analyzingId = pendingSource?.id ?? null;
+
   // Reset transient UI state when switching research sessions.
   useEffect(() => {
     setIsTyping(false);
-    setAnalyzing(false);
-    setAnalyzingId(null);
     setGenerating(false);
     setNewPromptId(null);
     setEditingSource(null);
   }, [ws.activeResearch.id]);
-
-  const sources = ws.activeResearch.sources;
-  const messages = ws.activeResearch.messages;
-  const prompts = ws.activeResearch.prompts;
-
-  const setSources: Dispatch<SetStateAction<Source[]>> = useCallback(
-    (next) => {
-      ws.updateActiveResearch((r) => ({
-        ...r,
-        sources: typeof next === 'function' ? (next as (p: Source[]) => Source[])(r.sources) : next,
-      }));
-    },
-    [ws]
-  );
 
   const openAdd = useCallback((initial?: AddTab) => {
     setModalInitialTab(initial ?? 'pdf');
     setModalOpen(true);
   }, []);
 
-  const addSource = (payload: Omit<Source, 'id'>) => {
-    const id = 's_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    ws.updateActiveResearch((r) => ({ ...r, sources: [{ id, ...payload }, ...r.sources] }));
-    setAnalyzingId(id);
-    setAnalyzing(true);
-    setTimeout(() => {
-      setAnalyzing(false);
-      setAnalyzingId(null);
-    }, 2400);
-    showToast('Source added · indexing');
-  };
+  const addSource = useCallback(
+    async (payload: AddSourcePayload) => {
+      showToast('Source indexing…');
+      try {
+        await ws.addSource(payload);
+        showToast('Source indexed');
+      } catch (err) {
+        const maybe = err as Error & { code?: string; provider?: string };
+        if (maybe.code === 'missing_key') {
+          showToast(`Missing ${maybe.provider ?? 'provider'} key`);
+          window.location.href = '/settings/api-keys?onboarding=1';
+        } else {
+          showToast('Source failed');
+        }
+        throw err;
+      }
+    },
+    [ws, showToast]
+  );
+
+  const removeSource = useCallback(
+    async (id: string) => {
+      try {
+        await ws.removeSource(id);
+        showToast('Source removed');
+      } catch {
+        showToast('Could not remove source');
+      }
+    },
+    [ws, showToast]
+  );
+
+  const reindexSource = useCallback(
+    async (id: string) => {
+      try {
+        await ws.reindexSource(id);
+        showToast('Source re-indexed');
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not re-index source';
+        showToast(message);
+      }
+    },
+    [ws, showToast]
+  );
 
   const saveEditedSource = (next: Source) => {
     ws.updateActiveResearch((r) => ({
@@ -215,7 +237,8 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
               <SourcesColumn
                 key={ws.activeResearch.id}
                 sources={sources}
-                setSources={setSources}
+                onRemoveSource={removeSource}
+                onReindexSource={reindexSource}
                 onAdd={openAdd}
                 onEdit={setEditingSource}
                 analyzingId={analyzingId}
@@ -256,7 +279,8 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                 <SourcesColumn
                   key={ws.activeResearch.id}
                   sources={sources}
-                  setSources={setSources}
+                  onRemoveSource={removeSource}
+                  onReindexSource={reindexSource}
                   onAdd={openAdd}
                   onEdit={setEditingSource}
                   analyzingId={analyzingId}

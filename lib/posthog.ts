@@ -33,7 +33,6 @@ export function getPostHogServer(): PostHog {
     host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
     flushAt: 1,
     flushInterval: 0,
-    // @ts-expect-error - waitUntil is supported by posthog-node >=4 but not yet typed in older versions
     waitUntil,
   });
   return cached;

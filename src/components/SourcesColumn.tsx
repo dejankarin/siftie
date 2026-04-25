@@ -3,10 +3,8 @@ import {
   useMemo,
   useRef,
   useState,
-  type Dispatch,
   type KeyboardEvent,
   type ReactNode,
-  type SetStateAction,
 } from 'react';
 import { SOURCE_TYPES } from '../data/mock';
 import type { Source } from '../types';
@@ -294,7 +292,8 @@ function DetailedCard({
 
 export interface SourcesColumnProps {
   sources: Source[];
-  setSources: Dispatch<SetStateAction<Source[]>>;
+  onRemoveSource: (id: string) => Promise<void>;
+  onReindexSource: (id: string) => Promise<void>;
   onAdd: (initialTab?: AddTab) => void;
   onEdit: (source: Source) => void;
   analyzingId: string | null;
@@ -315,7 +314,8 @@ function getInitialView(): ViewMode {
 
 export function SourcesColumn({
   sources,
-  setSources,
+  onRemoveSource,
+  onReindexSource,
   onAdd,
   onEdit,
   analyzingId,
@@ -330,6 +330,7 @@ export function SourcesColumn({
   const [query, setQuery] = useState('');
   const [renaming, setRenaming] = useState(renameOnMount);
   const [draftName, setDraftName] = useState(researchName);
+  const [reindexing, setReindexing] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -372,11 +373,27 @@ export function SourcesColumn({
     }
   };
 
-  const removeSource = (id: string) => {
+  const removeSource = async (id: string) => {
     const target = sources.find((s) => s.id === id);
     if (!target) return;
     if (window.confirm(`Remove "${target.title}"? The agent will stop using this source.`)) {
-      setSources((prev) => prev.filter((s) => s.id !== id));
+      await onRemoveSource(id);
+    }
+  };
+
+  const reindexAll = async () => {
+    const candidates = sources.filter((s) => (s.type === 'url' || s.type === 'md') && !s.pending);
+    if (candidates.length === 0) {
+      window.alert('Re-index is currently available for URL and Markdown sources. Re-upload PDFs or Word docs to refresh them.');
+      return;
+    }
+    setReindexing(true);
+    try {
+      for (const source of candidates) {
+        await onReindexSource(source.id);
+      }
+    } finally {
+      setReindexing(false);
     }
   };
 
@@ -399,7 +416,10 @@ export function SourcesColumn({
     return arr;
   }, [sources, query, sort]);
 
-  const totalWords = useMemo(() => sources.length * 856, [sources.length]);
+  const totalWords = useMemo(
+    () => sources.reduce((sum, source) => sum + (source.contextDoc?.words ?? 0), 0),
+    [sources],
+  );
 
   return (
     <section className="flex flex-col h-full min-h-0">
@@ -481,8 +501,13 @@ export function SourcesColumn({
             <span className="text-[var(--ink-2)] font-medium">{sources.length}</span> sources ·{' '}
             <span className="text-[var(--ink-2)] font-medium">{totalWords.toLocaleString()}</span> words indexed
           </span>
-          <button type="button" className="text-[var(--ink-2)] hover:text-[var(--ink)]">
-            Re-index
+          <button
+            type="button"
+            onClick={reindexAll}
+            disabled={reindexing || sources.some((s) => s.pending)}
+            className="text-[var(--ink-2)] hover:text-[var(--ink)] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {reindexing ? 'Re-indexing…' : 'Re-index'}
           </button>
         </div>
       )}
@@ -516,11 +541,11 @@ export function SourcesColumn({
           </div>
         ) : view === 'compact' ? (
           filtered.map((s) => (
-            <CompactRow key={s.id} source={s} analyzing={s.id === analyzingId} onEdit={onEdit} onRemove={removeSource} />
+            <CompactRow key={s.id} source={s} analyzing={s.pending || s.id === analyzingId} onEdit={onEdit} onRemove={removeSource} />
           ))
         ) : (
           filtered.map((s) => (
-            <DetailedCard key={s.id} source={s} analyzing={s.id === analyzingId} onEdit={onEdit} onRemove={removeSource} />
+            <DetailedCard key={s.id} source={s} analyzing={s.pending || s.id === analyzingId} onEdit={onEdit} onRemove={removeSource} />
           ))
         )}
       </div>

@@ -1,9 +1,10 @@
 /**
  * Server-side helpers for the workspace tables (`projects` + `researches`).
  *
- * For Session 2B we only persist project + research metadata to Supabase.
- * Sources, messages, and prompts within a research stay client-side until
- * Sessions 3 and 4 ship the live ingest + chat flows that own those tables.
+ * As of Session 3 the bootstrap payload also includes every research's
+ * sources, so the client can paint the full workspace in one round-trip
+ * (no N+1 fetches when switching researches). Messages and prompts remain
+ * client-side until Sessions 4 and 5.
  *
  * We use the service-role client + manual `clerk_user_id` filters rather
  * than the Clerk-scoped client so behaviour is consistent with `lib/keys.ts`
@@ -12,6 +13,7 @@
  * `requireUser()` first.
  */
 import 'server-only';
+import { listSourcesForResearches, type SourceRow } from './sources';
 import { createServiceRoleSupabaseClient } from './supabase/server';
 
 export interface WorkspaceProject {
@@ -30,6 +32,11 @@ export interface WorkspaceResearch {
 export interface WorkspacePayload {
   projects: WorkspaceProject[];
   researches: WorkspaceResearch[];
+  /**
+   * Every source for every research the user owns, returned newest-first
+   * within each research. Empty for fresh users / fresh researches.
+   */
+  sources: SourceRow[];
 }
 
 const DEFAULT_PROJECT_NAME = 'My first project';
@@ -83,6 +90,10 @@ export async function fetchOrSeedWorkspace(clerkUserId: string): Promise<Workspa
     }
   }
 
+  // Hydrate sources for every research in one query (avoids N+1).
+  const researchIds = finalResearches.map((r) => r.id);
+  const sources = await listSourcesForResearches(researchIds);
+
   return {
     projects: projects.map((p) => ({
       id: p.id,
@@ -95,6 +106,7 @@ export async function fetchOrSeedWorkspace(clerkUserId: string): Promise<Workspa
       name: r.name,
       createdAt: new Date(r.created_at).getTime(),
     })),
+    sources,
   };
 }
 
@@ -124,6 +136,8 @@ async function seedInitialWorkspace(clerkUserId: string): Promise<WorkspacePaylo
         createdAt: new Date(research.created_at).getTime(),
       },
     ],
+    // Fresh user has no sources yet — saves one round-trip.
+    sources: [],
   };
 }
 
