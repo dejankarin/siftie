@@ -175,9 +175,8 @@ export function ApiKeysForm({ initialStatus, onboarding }: ApiKeysFormProps) {
           {onboarding ? 'Welcome to Siftie. Add your provider keys to get started.' : 'API Keys'}
         </h1>
         <p className="text-[14px] text-[var(--ink-2)] mt-1.5 leading-relaxed">
-          Bring your own provider keys. Siftie encrypts each key at rest with
-          AES-256-GCM and decrypts it server-side only when a request needs it.
-          Costs come out of your provider accounts, not ours.
+          Bring your own provider keys. Siftie stores every key encrypted and
+          only decrypts it on the server when a request needs it.
         </p>
       </header>
 
