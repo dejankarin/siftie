@@ -13,15 +13,35 @@ import { Toast } from './components/Toast';
 import { TopBar } from './components/TopBar';
 import { useTheme } from './hooks/useTheme';
 import { useIsDesktop } from './hooks/useViewport';
-import { useWorkspace } from './hooks/useWorkspace';
+import { useWorkspace, type UseWorkspaceResult } from './hooks/useWorkspace';
 import type { Message, PortfolioPrompt, Source } from './types';
 
 type MobileTab = 'sources' | 'chat' | 'prompts';
 
+/**
+ * Gate component — calls useWorkspace and shows a loading state until the
+ * Supabase fetch completes. Once loaded, hands the workspace to AppContent
+ * as a prop so AppContent's internal hooks can assume non-null data and
+ * stay rules-of-hooks-compliant.
+ */
 export default function App() {
+  const ws = useWorkspace();
+  if (!ws) {
+    // CSS variables (--bg, --ink-2) cascade from the data-theme attribute
+    // set on <html> by the bootstrap script in app/layout.tsx, so the
+    // loading state honours the user's theme without re-running useTheme().
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] text-[var(--ink-2)] text-[13.5px] font-[Inter]">
+        Loading workspace…
+      </div>
+    );
+  }
+  return <AppContent ws={ws} />;
+}
+
+function AppContent({ ws }: { ws: UseWorkspaceResult }) {
   const isDesktop = useIsDesktop();
   const { theme, toggle: toggleTheme } = useTheme();
-  const ws = useWorkspace();
 
   const [tab, setTab] = useState<MobileTab>('chat');
   const [modalOpen, setModalOpen] = useState(false);

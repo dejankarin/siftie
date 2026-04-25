@@ -26,6 +26,7 @@
 import 'server-only';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { createServiceRoleSupabaseClient } from './supabase/server';
+import { ForbiddenError } from './workspace';
 
 export class UnauthorizedError extends Error {
   status = 401;
@@ -100,6 +101,9 @@ export function withUser<TCtx = unknown>(handler: Handler<TCtx>) {
     } catch (err) {
       if (err instanceof UnauthorizedError) {
         return Response.json({ error: err.message }, { status: 401 });
+      }
+      if (err instanceof ForbiddenError) {
+        return Response.json({ error: err.message }, { status: 403 });
       }
       console.error('[withUser] unhandled error:', err);
       const message = err instanceof Error ? err.message : 'Internal error';
