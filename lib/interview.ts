@@ -37,10 +37,10 @@
  */
 import 'server-only';
 import { PostHogGoogleGenAI } from '@posthog/ai/gemini';
-import pRetry, { AbortError } from 'p-retry';
 import { z } from 'zod';
 import type { ContextDoc } from './ingest/schema';
 import { getPostHogServer } from './posthog';
+import { withResilience } from './resilience';
 
 const GEMINI_MODEL = 'gemini-flash-latest';
 const TIMEOUT_MS = 60_000;
@@ -114,49 +114,42 @@ export async function generateInterviewQuestions(
   const briefs = input.sources.map((s) => buildSourceBrief(s.kind, s.contextDoc));
   const userPrompt = buildUserPrompt(input.researchTitle, input.userMessage, briefs);
 
-  const run = async () => {
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`Gemini timeout after ${TIMEOUT_MS}ms`)), TIMEOUT_MS),
-    );
-
-    const callPromise = ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: userPrompt }],
+  const response = await withResilience(
+    () =>
+      ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: userPrompt }],
+          },
+        ],
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          responseMimeType: 'application/json',
+          responseJsonSchema: ResponseJsonSchema,
+          temperature: 0.4,
         },
-      ],
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        responseMimeType: 'application/json',
-        responseJsonSchema: ResponseJsonSchema,
-        temperature: 0.4,
+        posthogDistinctId: opts.posthogDistinctId,
+        posthogTraceId: opts.posthogTraceId,
+        posthogPrivacyMode: opts.posthogPrivacyMode,
+        posthogProperties: {
+          feature: 'interview',
+          tag: 'interview_questions',
+          ...opts.posthogProperties,
+        },
+      }),
+    {
+      timeoutMs: TIMEOUT_MS,
+      retries: 2,
+      minTimeoutMs: 500,
+      maxTimeoutMs: 2_000,
+      shouldAbort: (err) => {
+        const msg = err instanceof Error ? err.message : String(err ?? '');
+        return /401|403|API key|invalid_api_key|PERMISSION_DENIED|quota/i.test(msg);
       },
-      posthogDistinctId: opts.posthogDistinctId,
-      posthogTraceId: opts.posthogTraceId,
-      posthogPrivacyMode: opts.posthogPrivacyMode,
-      posthogProperties: {
-        feature: 'interview',
-        tag: 'interview_questions',
-        ...opts.posthogProperties,
-      },
-    });
-
-    return Promise.race([callPromise, timeoutPromise]);
-  };
-
-  const response = await pRetry(run, {
-    retries: 2,
-    minTimeout: 500,
-    maxTimeout: 2000,
-    onFailedAttempt: (ctx) => {
-      const msg = ctx.error instanceof Error ? ctx.error.message : String(ctx.error ?? '');
-      if (/401|403|API key|invalid_api_key|PERMISSION_DENIED|quota/i.test(msg)) {
-        throw new AbortError(msg);
-      }
     },
-  });
+  );
 
   const text = response.text;
   if (typeof text !== 'string' || text.length === 0) {

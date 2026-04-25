@@ -30,9 +30,9 @@
  */
 import 'server-only';
 import { PostHogGoogleGenAI } from '@posthog/ai/gemini';
-import pRetry, { AbortError } from 'p-retry';
 import { ContextDoc, ContextDocJsonSchema } from './ingest/schema';
 import { getPostHogServer } from './posthog';
+import { withResilience } from './resilience';
 
 /**
  * Model used for every ContextDoc generation. We pin to a Flash model so
@@ -100,52 +100,42 @@ export async function contextDoc(
 
   const userParts = buildUserParts(input);
 
-  const run = async () => {
-    // We use `Promise.race` for a hard timeout because the Google SDK
-    // doesn't expose an AbortSignal on generateContent today.
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`Gemini timeout after ${TIMEOUT_MS}ms`)), TIMEOUT_MS),
-    );
-
-    const callPromise = ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: [
-        {
-          role: 'user',
-          parts: userParts,
+  const response = await withResilience(
+    () =>
+      ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: [
+          {
+            role: 'user',
+            parts: userParts,
+          },
+        ],
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          responseMimeType: 'application/json',
+          responseJsonSchema: ContextDocJsonSchema,
+          temperature: 0.2,
         },
-      ],
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        responseMimeType: 'application/json',
-        responseJsonSchema: ContextDocJsonSchema,
-        temperature: 0.2,
-      },
-      // PostHog tracking params (typed via @posthog/ai's MonitoringParams).
-      posthogDistinctId: opts.posthogDistinctId,
-      posthogTraceId: opts.posthogTraceId,
-      posthogPrivacyMode: opts.posthogPrivacyMode,
-      posthogProperties: {
-        feature: 'ingest',
-        ...opts.posthogProperties,
-      },
-    });
-
-    return Promise.race([callPromise, timeoutPromise]);
-  };
-
-  const response = await pRetry(run, {
-    retries: 2,
-    minTimeout: 500,
-    maxTimeout: 2000,
-    onFailedAttempt: (ctx) => {
+        posthogDistinctId: opts.posthogDistinctId,
+        posthogTraceId: opts.posthogTraceId,
+        posthogPrivacyMode: opts.posthogPrivacyMode,
+        posthogProperties: {
+          feature: 'ingest',
+          ...opts.posthogProperties,
+        },
+      }),
+    {
+      timeoutMs: TIMEOUT_MS,
+      retries: 2,
+      minTimeoutMs: 500,
+      maxTimeoutMs: 2_000,
       // Don't retry on auth / quota errors — they won't get better.
-      const msg = ctx.error instanceof Error ? ctx.error.message : String(ctx.error ?? '');
-      if (/401|403|API key|invalid_api_key|PERMISSION_DENIED|quota/i.test(msg)) {
-        throw new AbortError(msg);
-      }
+      shouldAbort: (err) => {
+        const msg = err instanceof Error ? err.message : String(err ?? '');
+        return /401|403|API key|invalid_api_key|PERMISSION_DENIED|quota/i.test(msg);
+      },
     },
-  });
+  );
 
   const text = response.text;
   if (typeof text !== 'string' || text.length === 0) {

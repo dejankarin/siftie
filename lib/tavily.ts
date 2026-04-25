@@ -18,6 +18,7 @@
 import 'server-only';
 import { tavily } from '@tavily/core';
 import { getPostHogServer } from './posthog';
+import { withResilience } from './resilience';
 
 export interface TavilyExtractResult {
   /** Page title from Tavily (often missing on weird/SPA pages — caller should fall back to URL). */
@@ -69,13 +70,31 @@ export async function extractUrl(
   let errorCode: string | undefined;
 
   try {
-    const response = await client.extract([url], {
-      extractDepth: 'basic',
-      format: 'markdown',
-      // Reasonable per-request timeout — Tavily defaults to 60s server-side
-      // but we want to surface failures faster on slow pages.
-      timeout: 30,
-    });
+    // Wrap the SDK call in `withResilience` so a single transient flake
+    // (Tavily timeout, brief 5xx) retries without us having to think
+    // about it. Auth failures abort immediately — no point retrying a
+    // bad key. We deliberately do NOT pass a `signature` because URL
+    // extracts can legitimately be re-fetched (Re-index button).
+    const response = await withResilience(
+      () =>
+        client.extract([url], {
+          extractDepth: 'basic',
+          format: 'markdown',
+          // Tavily defaults to 60s; 30s is long enough for normal pages
+          // and gives the resilience layer's own timer some headroom.
+          timeout: 30,
+        }),
+      {
+        timeoutMs: 35_000,
+        retries: 2,
+        minTimeoutMs: 500,
+        maxTimeoutMs: 2_000,
+        shouldAbort: (err) => {
+          const msg = err instanceof Error ? err.message : String(err ?? '');
+          return /401|403|invalid api key|unauthorized/i.test(msg);
+        },
+      },
+    );
 
     const failure = response.failedResults?.find((r) => r.url === url);
     if (failure) {
