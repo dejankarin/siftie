@@ -1,4 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type KeyboardEvent,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
 import { SOURCE_TYPES } from '../data/mock';
 import type { Source } from '../types';
 import type { AddTab } from './AddSourceModal';
@@ -45,6 +54,14 @@ function TrashIcon({ size = 13 }: IconProps) {
     </svg>
   );
 }
+function RenamePencilIcon({ size = 12 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
 function CompactIcon({ size = 14 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
@@ -85,7 +102,7 @@ function AddMenu({ onPick }: { onPick: (tab: AddTab) => void }) {
     const onDoc = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
-    const onEsc = (e: KeyboardEvent) => {
+    const onEsc = (e: globalThis.KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
@@ -281,6 +298,11 @@ export interface SourcesColumnProps {
   onAdd: (initialTab?: AddTab) => void;
   onEdit: (source: Source) => void;
   analyzingId: string | null;
+  navSlot?: ReactNode;
+  researchName: string;
+  onRenameResearch: (name: string) => void;
+  renameOnMount?: boolean;
+  onRenameConsumed?: () => void;
 }
 
 const TYPE_ORDER: Record<Source['type'], number> = { pdf: 0, url: 1, paste: 2, db: 3 };
@@ -291,14 +313,64 @@ function getInitialView(): ViewMode {
   return stored === 'compact' || stored === 'detailed' ? stored : 'detailed';
 }
 
-export function SourcesColumn({ sources, setSources, onAdd, onEdit, analyzingId }: SourcesColumnProps) {
+export function SourcesColumn({
+  sources,
+  setSources,
+  onAdd,
+  onEdit,
+  analyzingId,
+  navSlot,
+  researchName,
+  onRenameResearch,
+  renameOnMount = false,
+  onRenameConsumed,
+}: SourcesColumnProps) {
   const [view, setView] = useState<ViewMode>(getInitialView);
   const [sort, setSort] = useState<SortMode>('recent');
   const [query, setQuery] = useState('');
+  const [renaming, setRenaming] = useState(renameOnMount);
+  const [draftName, setDraftName] = useState(researchName);
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     window.localStorage.setItem(VIEW_STORAGE_KEY, view);
   }, [view]);
+
+  useEffect(() => {
+    if (renaming) {
+      setDraftName(researchName);
+      const t = window.setTimeout(() => renameInputRef.current?.select(), 0);
+      return () => window.clearTimeout(t);
+    }
+    return;
+  }, [renaming, researchName]);
+
+  useEffect(() => {
+    if (renameOnMount) onRenameConsumed?.();
+  }, [renameOnMount, onRenameConsumed]);
+
+  const startRename = () => {
+    setDraftName(researchName);
+    setRenaming(true);
+  };
+  const commitRename = () => {
+    const next = draftName.trim();
+    if (next && next !== researchName) onRenameResearch(next);
+    setRenaming(false);
+  };
+  const cancelRename = () => {
+    setRenaming(false);
+    setDraftName(researchName);
+  };
+  const onRenameKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitRename();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelRename();
+    }
+  };
 
   const removeSource = (id: string) => {
     const target = sources.find((s) => s.id === id);
@@ -327,20 +399,53 @@ export function SourcesColumn({ sources, setSources, onAdd, onEdit, analyzingId 
     return arr;
   }, [sources, query, sort]);
 
-  const totalWords = 4280;
+  const totalWords = useMemo(() => sources.length * 856, [sources.length]);
 
   return (
     <section className="flex flex-col h-full min-h-0">
-      <header className="px-5 pt-5 pb-3">
+      {navSlot && <div className="px-4 pt-4 pb-2">{navSlot}</div>}
+      {navSlot && <div className="mx-4 my-1 h-px bg-[var(--line)]" aria-hidden="true" />}
+      <header className={`px-5 ${navSlot ? 'pt-3' : 'pt-5'} pb-3`}>
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <h2 className="text-[15px] font-semibold tracking-tight text-[var(--ink)]">Sources</h2>
-            <span className="text-[12px] text-[var(--ink-3)]">{sources.length}</span>
+          <div className="flex items-center gap-1.5 min-w-0 flex-1 group/research-name">
+            {renaming ? (
+              <input
+                ref={renameInputRef}
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={onRenameKey}
+                aria-label="Research name"
+                placeholder="Name this research"
+                className="flex-1 min-w-0 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-2 py-1 text-[15px] font-semibold tracking-tight text-[var(--ink)] focus-ring"
+              />
+            ) : (
+              <>
+                <h2
+                  className="text-[15px] font-semibold tracking-tight text-[var(--ink)] truncate cursor-text"
+                  onDoubleClick={startRename}
+                  title="Double-click to rename"
+                >
+                  {researchName}
+                </h2>
+                <button
+                  type="button"
+                  onClick={startRename}
+                  aria-label="Rename research"
+                  title="Rename research"
+                  className="btn-ghost flex items-center justify-center w-6 h-6 text-[var(--ink-3)] hover:text-[var(--ink)] opacity-0 group-hover/research-name:opacity-100 focus-within:opacity-100 transition shrink-0"
+                >
+                  <RenamePencilIcon />
+                </button>
+              </>
+            )}
           </div>
           <AddMenu onPick={onAdd} />
         </div>
         <p className="mt-1 text-[12px] text-[var(--ink-3)] leading-snug">
-          The agent will analyze these to generate your prompt portfolio.
+          {sources.length === 0
+            ? 'Add the contents below to start this research.'
+            : `${sources.length} ${sources.length === 1 ? 'source' : 'sources'} feeding the agent.`}
         </p>
       </header>
 
@@ -375,22 +480,24 @@ export function SourcesColumn({ sources, setSources, onAdd, onEdit, analyzingId 
         </div>
       </div>
 
-      <div className="mx-5 mb-3 px-3 py-2 rounded-xl bg-[var(--surface-2)] flex items-center justify-between text-[11.5px] text-[var(--ink-3)]">
-        <span>
-          <span className="text-[var(--ink-2)] font-medium">{sources.length}</span> sources ·{' '}
-          <span className="text-[var(--ink-2)] font-medium">{totalWords.toLocaleString()}</span> words indexed
-        </span>
-        <button type="button" className="text-[var(--ink-2)] hover:text-[var(--ink)]">
-          Re-index
-        </button>
-      </div>
+      {sources.length > 0 && (
+        <div className="mx-5 mb-3 px-3 py-2 rounded-xl bg-[var(--surface-2)] flex items-center justify-between text-[11.5px] text-[var(--ink-3)]">
+          <span>
+            <span className="text-[var(--ink-2)] font-medium">{sources.length}</span> sources ·{' '}
+            <span className="text-[var(--ink-2)] font-medium">{totalWords.toLocaleString()}</span> words indexed
+          </span>
+          <button type="button" className="text-[var(--ink-2)] hover:text-[var(--ink)]">
+            Re-index
+          </button>
+        </div>
+      )}
 
       <div className={`flex-1 min-h-0 scroll-y px-3 pb-6 ${view === 'compact' ? 'space-y-1' : 'space-y-2.5 px-5'}`}>
         {sources.length === 0 ? (
           <div className="mx-2 border border-dashed border-[var(--line)] rounded-2xl p-8 text-center">
-            <p className="text-[13px] font-medium text-[var(--ink)]">No sources yet</p>
+            <p className="text-[13px] font-medium text-[var(--ink)]">Upload contents for this research</p>
             <p className="text-[12px] text-[var(--ink-3)] mt-1">
-              Add a brand brief, competitor URLs, or customer interviews to get started.
+              Brand briefs, competitor URLs, customer interviews — anything the agent should reason on.
             </p>
             <button
               type="button"

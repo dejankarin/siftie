@@ -27,3 +27,26 @@ export interface PortfolioPrompt {
 }
 
 export type PromptFilter = 'All' | PromptCluster;
+
+export interface Project {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+
+export interface Research {
+  id: string;
+  projectId: string;
+  name: string;
+  createdAt: number;
+  sources: Source[];
+  messages: Message[];
+  prompts: PortfolioPrompt[];
+}
+
+export interface WorkspaceState {
+  projects: Project[];
+  researches: Research[];
+  activeProjectId: string;
+  activeResearchId: string;
+}
