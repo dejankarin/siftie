@@ -1,6 +1,5 @@
-import Link from 'next/link';
-import { UserButton } from '@clerk/nextjs';
 import { SettingsSidebar } from './SettingsSidebar';
+import { SettingsTopBar } from './SettingsTopBar';
 
 /**
  * Shared chrome for the /settings/* sub-tree:
@@ -15,30 +14,7 @@ import { SettingsSidebar } from './SettingsSidebar';
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)] flex flex-col">
-      <header className="flex items-center justify-between px-6 py-3 border-b border-[var(--line)] bg-[var(--bg)]/80 backdrop-blur sticky top-0 z-20">
-        <Link href="/" aria-label="Siftie home" className="inline-flex items-center h-7">
-          <img
-            src="/logo/Siftie-logo-light.svg"
-            alt="Siftie"
-            className="theme-logo-light h-7 w-auto"
-          />
-          <img
-            src="/logo/Siftie-logo-dark.svg"
-            alt=""
-            aria-hidden="true"
-            className="theme-logo-dark h-7 w-auto"
-          />
-        </Link>
-        <div className="flex items-center gap-3">
-          <Link
-            href="/"
-            className="px-3 py-1.5 rounded-[10px] border border-[var(--line)] bg-[var(--surface-1)] text-[13px] font-medium text-[var(--ink)] hover:bg-[var(--surface-2)] hover:border-[var(--line-strong)] transition-colors"
-          >
-            Back to home
-          </Link>
-          <UserButton appearance={{ elements: { avatarBox: 'w-7 h-7' } }} />
-        </div>
-      </header>
+      <SettingsTopBar />
 
       <div className="flex-1 flex flex-col md:flex-row max-w-[960px] w-full mx-auto px-6 py-10 gap-10">
         <aside className="md:w-[180px] shrink-0">
