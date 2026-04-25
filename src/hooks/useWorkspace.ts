@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createBlankResearch, seedWorkspace, uid } from '../data/workspace';
 import type { Project, Research, WorkspaceState } from '../types';
 
-const STORAGE_KEY = 'aeoagent.workspace.v1';
+const STORAGE_KEY = 'siftie.workspace.v1';
 
 function isValidWorkspace(value: unknown): value is WorkspaceState {
   if (!value || typeof value !== 'object') return false;

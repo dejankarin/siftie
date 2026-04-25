@@ -1,8 +1,8 @@
 import type { Theme } from '../hooks/useTheme';
 import { ThemeToggle } from './ThemeToggle';
 
-const LIGHT_LOGO = '/assets/AEOagent-logo.svg';
-const DARK_LOGO = '/assets/AEOagent-logo-dark.svg';
+const LIGHT_LOGO = '/assets/Siftie-logo-light.svg';
+const DARK_LOGO = '/assets/Siftie-logo-dark.svg';
 
 interface TopBarProps {
   theme: Theme;
@@ -14,7 +14,7 @@ export function TopBar({ theme, onToggleTheme }: TopBarProps) {
   return (
     <header className="hidden md:flex items-center justify-between px-6 py-3 border-b border-[var(--line)] bg-[var(--bg)]/80 backdrop-blur sticky top-0 z-20">
       <div className="flex items-center gap-3">
-        <img src={logo} alt="AEOagent" style={{ height: '18px', width: 'auto' }} />
+        <img src={logo} alt="Siftie" style={{ height: '18px', width: 'auto' }} />
         <span className="w-px h-4 bg-[var(--line)]"></span>
         <span className="text-[12px] text-[var(--ink-3)]">Loftway · SS26 launch portfolio</span>
       </div>

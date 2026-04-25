@@ -2,9 +2,10 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'AEOagent',
+  metadataBase: new URL('https://siftie.app'),
+  title: 'Siftie',
   description:
-    'AEOagent — chat-driven prompt-portfolio builder that turns brand sources into AI-engine-ready prompts.',
+    'Siftie — chat-driven prompt-portfolio builder that turns brand sources into AI-engine-ready prompts.',
 };
 
 export const viewport: Viewport = {
@@ -16,7 +17,7 @@ export const viewport: Viewport = {
 // Applies the persisted theme before paint to avoid a light/dark FOUC.
 const themeBootstrapScript = `(() => {
   try {
-    const stored = localStorage.getItem('aeoagent.theme');
+    const stored = localStorage.getItem('siftie.theme');
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     const theme = stored === 'light' || stored === 'dark' ? stored : (prefersDark ? 'dark' : 'light');
     document.documentElement.setAttribute('data-theme', theme);

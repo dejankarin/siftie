@@ -36,7 +36,7 @@ function MessageBubble({ msg }: { msg: Message }) {
       {isAgent ? <AgentAvatar /> : <UserAvatar />}
       <div className={`flex-1 min-w-0 ${isAgent ? '' : 'flex flex-col items-end'}`}>
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-[12px] font-medium text-[var(--ink)]">{isAgent ? 'AEOagent' : 'You'}</span>
+          <span className="text-[12px] font-medium text-[var(--ink)]">{isAgent ? 'Siftie' : 'You'}</span>
           <span className="text-[11px] text-[var(--ink-3)]">{msg.time}</span>
         </div>
         <div
@@ -135,7 +135,7 @@ export function ChatColumn({ messages, onSend, isTyping, sourcesCount, analyzing
             <AgentAvatar size={34} />
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-[15px] font-semibold tracking-tight text-[var(--ink)]">AEOagent</h2>
+                <h2 className="text-[15px] font-semibold tracking-tight text-[var(--ink)]">Siftie</h2>
                 <span className="chip bg-[var(--accent-soft)] text-[var(--accent-ink)]">Research</span>
               </div>
               <div className="flex items-center gap-1.5 mt-0.5">
@@ -177,7 +177,7 @@ export function ChatColumn({ messages, onSend, isTyping, sourcesCount, analyzing
             onChange={onInput}
             onKeyDown={onKeyDown}
             rows={1}
-            placeholder="Reply to AEOagent…"
+            placeholder="Reply to Siftie…"
             className="w-full resize-none bg-transparent outline-none text-[14px] leading-[1.55] text-[var(--ink)] placeholder:text-[var(--ink-3)] max-h-[140px]"
           />
           <div className="flex items-center justify-between mt-2">
@@ -205,7 +205,7 @@ export function ChatColumn({ messages, onSend, isTyping, sourcesCount, analyzing
             </button>
           </div>
         </div>
-        <p className="text-center mt-2 text-[10.5px] text-[var(--ink-3)]">AEOagent uses your sources as the only context. Replies cite source IDs.</p>
+        <p className="text-center mt-2 text-[10.5px] text-[var(--ink-3)]">Siftie uses your sources as the only context. Replies cite source IDs.</p>
       </div>
     </section>
   );

@@ -1,8 +1,8 @@
 import type { Theme } from '../hooks/useTheme';
 import { ThemeToggle } from './ThemeToggle';
 
-const LIGHT_LOGO = '/assets/AEOagent-logo.svg';
-const DARK_LOGO = '/assets/AEOagent-logo-dark.svg';
+const LIGHT_LOGO = '/assets/Siftie-logo-light.svg';
+const DARK_LOGO = '/assets/Siftie-logo-dark.svg';
 
 type MobileTab = 'sources' | 'chat' | 'prompts';
 
@@ -14,7 +14,7 @@ interface MobileTopBarProps {
 
 const titles: Record<MobileTab, string> = {
   sources: 'Sources',
-  chat: 'AEOagent',
+  chat: 'Siftie',
   prompts: 'Prompt Portfolio',
 };
 
@@ -23,7 +23,7 @@ export function MobileTopBar({ tab, theme, onToggleTheme }: MobileTopBarProps) {
   return (
     <header className="md:hidden flex items-center justify-between px-4 py-3 border-b border-[var(--line)] bg-[var(--bg)]/90 backdrop-blur sticky top-0 z-20">
       <div className="flex items-center gap-2.5">
-        <img src={logo} alt="AEOagent" style={{ height: '14px', width: 'auto' }} />
+        <img src={logo} alt="Siftie" style={{ height: '14px', width: 'auto' }} />
         <span className="w-px h-3.5 bg-[var(--line)]"></span>
         <span className="text-[12.5px] text-[var(--ink-3)]">{titles[tab]}</span>
       </div>

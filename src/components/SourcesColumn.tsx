@@ -15,7 +15,7 @@ import type { AddTab } from './AddSourceModal';
 type ViewMode = 'compact' | 'detailed';
 type SortMode = 'recent' | 'type' | 'title';
 
-const VIEW_STORAGE_KEY = 'aeoagent.sourcesView';
+const VIEW_STORAGE_KEY = 'siftie.sourcesView';
 
 interface IconProps {
   size?: number;

@@ -1,6 +1,6 @@
-# aeo-agent.com
+# siftie.app
 
-A three-column research UI for **AEOagent** — a chat-driven prompt-portfolio builder that turns brand sources (PDFs, URLs, pasted text, internal DB) into AI-engine-ready prompts. Built with Next.js (App Router) + React + TypeScript + Tailwind, deployed on Vercel.
+A three-column research UI for **Siftie** — a chat-driven prompt-portfolio builder that turns brand sources (PDFs, URLs, pasted text, internal DB) into AI-engine-ready prompts. Built with Next.js (App Router) + React + TypeScript + Tailwind, deployed on Vercel at [siftie.app](https://siftie.app).
 
 ## Run the UI locally
 
@@ -39,17 +39,18 @@ src/
   data/mock.ts                # Loftway demo content
   data/workspace.ts           # workspace seed + blank-research factory
   types.ts                    # shared types
-public/assets/                # AEOagent logos (light + dark)
+public/assets/                # Siftie logos (light + dark)
+logo/                         # local-only logo source files (gitignored)
 design-extract/               # original HTML+JSX prototype (reference only)
 ```
 
 ### Theming
 
-The light/dark theme is driven by CSS variables under `:root` and `[data-theme="dark"]` in `src/index.css`. The toggle persists to `localStorage` and falls back to `prefers-color-scheme`.
+The light/dark theme is driven by CSS variables under `:root` and `[data-theme="dark"]` in `app/globals.css`. The toggle persists to `localStorage` (key `siftie.theme`) and falls back to `prefers-color-scheme`.
 
 ### Projects & research sessions
 
-The Sources column hosts a project / research switcher (top of the column). Each **research session** owns its own sources, chat, and prompt portfolio — switching swaps all three columns at once. Workspace state (projects + research sessions) persists to `localStorage` under `aeoagent.workspace.v1`, and a new research starts blank with a one-line greeting from the agent.
+The Sources column hosts a project / research switcher (top of the column). Each **research session** owns its own sources, chat, and prompt portfolio — switching swaps all three columns at once. Workspace state (projects + research sessions) persists to `localStorage` under `siftie.workspace.v1`, and a new research starts blank with a one-line greeting from the agent.
 
 ## Contributor setup
 
