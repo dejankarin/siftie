@@ -41,8 +41,23 @@ export interface Source {
 export interface Message {
   id: string;
   role: 'user' | 'agent';
+  /** Display-formatted timestamp (e.g. "10:42 AM"); derived from `createdAt`. */
   time: string;
   text: string;
+  /**
+   * Epoch milliseconds when the message was created server-side. Optional
+   * for legacy / synthetic messages (the client-only intro bubble has no
+   * server row). Real persisted messages always have it.
+   */
+  createdAt?: number;
+  /** UI-only flag while a `POST /api/messages` call is in flight. */
+  pending?: boolean;
+  /** Reserved for Session 6 council bubbles — anonymised reviewer / chair label. */
+  councilRole?: 'reviewer' | 'chair' | null;
+  /** Reserved for Session 6 council bubbles — seat number 1..4. */
+  councilSeat?: number | null;
+  /** Reserved for Session 6 — links message to the run that produced it. */
+  runId?: string | null;
 }
 
 export type PromptCluster = 'Category' | 'Persona' | 'Comparison';

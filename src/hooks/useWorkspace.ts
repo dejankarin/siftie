@@ -1,16 +1,19 @@
+import { useSession } from '@clerk/nextjs';
+import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createBrowserSupabaseClient } from '../../lib/supabase/client';
 import { blankIntroMessage, createBlankResearch } from '../data/workspace';
-import type { ContextDoc, Project, Research, Source, WorkspaceState } from '../types';
+import type { ContextDoc, Message, Project, Research, Source, WorkspaceState } from '../types';
 
 /**
  * Workspace hook — Supabase edition.
  *
  * Behaviour:
  *   - On mount: GETs /api/workspace which returns the user's projects,
- *     researches, AND every existing source from Supabase in a single
- *     round-trip. Returns `null` while in flight so callers can show a
- *     loading state without the hooks-rules dance of conditionally calling
- *     other hooks.
+ *     researches, every existing source AND every persisted message from
+ *     Supabase in a single round-trip. Returns `null` while in flight so
+ *     callers can show a loading state without the hooks-rules dance of
+ *     conditionally calling other hooks.
  *   - Project + research CRUD goes through API routes that hit Supabase.
  *     Mutations are optimistic — local state updates first, the network
  *     call fires in the background. On failure we log + leave the optimistic
@@ -21,8 +24,19 @@ import type { ContextDoc, Project, Research, Source, WorkspaceState } from '../t
  *     as long as the network call takes (Gemini ingest can be 5-30s).
  *     Failures roll back the optimistic insert and surface an error string
  *     to the caller.
- *   - Messages and prompts inside a research stay client-side until
- *     Sessions 4 and 5 wire them up to their own tables + Realtime.
+ *   - Chat messages (Session 4): `sendMessage` POSTs to /api/messages,
+ *     persists the user message, and (for the very first message of a
+ *     research with sources) generates 6 opening interview questions via
+ *     Gemini Flash. We optimistically insert the user message with a
+ *     temp id, replace it with the canonical row from the POST response,
+ *     then rely on the Supabase Realtime channel below for any future
+ *     agent messages (e.g. council bubbles in Session 6) to stream in.
+ *   - Realtime: a single channel subscribes to INSERTs on `public.messages`
+ *     for the whole user (RLS already filters to messages they own). The
+ *     handler dedupes by id against a `seenMessageIds` ref so a row that
+ *     arrived via the POST response isn't appended twice.
+ *   - Prompts inside a research stay client-side until Session 5/7 wires
+ *     them up to their own table.
  *   - Active project/research IDs are persisted to localStorage (just the
  *     two strings, ~80 bytes) so reload returns to the same view without a
  *     second server round-trip.
@@ -55,10 +69,27 @@ interface ApiSource {
   updatedAt: number;
 }
 
+interface ApiMessage {
+  id: string;
+  researchId: string;
+  role: 'user' | 'agent';
+  body: string;
+  createdAt: number;
+  councilRole: 'reviewer' | 'chair' | null;
+  councilSeat: number | null;
+  runId: string | null;
+}
+
 interface ApiWorkspaceResponse {
   projects: { id: string; name: string; createdAt: number }[];
   researches: { id: string; projectId: string; name: string; createdAt: number }[];
   sources: ApiSource[];
+  /**
+   * Every persisted message for every research the user owns, ordered
+   * oldest-first inside each research (chat order). Empty for fresh
+   * researches — the UI swaps in a synthetic intro bubble in that case.
+   */
+  messages: ApiMessage[];
 }
 
 /**
@@ -100,6 +131,23 @@ export interface UseWorkspaceResult {
   removeSource: (sourceId: string) => Promise<void>;
   /** Re-run the ingest pipeline for an existing source. */
   reindexSource: (sourceId: string) => Promise<Source>;
+  /**
+   * Send a chat message to the active research. Optimistically inserts
+   * the user message, POSTs to /api/messages, replaces the optimistic
+   * row with the canonical persisted row, and (when the server tells us
+   * an agent reply is coming) keeps `isTyping` true while the agent
+   * messages stream in via Realtime — or arrive in the POST response,
+   * whichever lands first.
+   *
+   * Resolves with `void` once the POST settles. Throws on network /
+   * server failures so the caller can show a toast.
+   */
+  sendMessage: (text: string) => Promise<void>;
+  /**
+   * True while the active research has an agent reply in flight. Drives
+   * the typing-bubble in `<ChatColumn />`.
+   */
+  isTyping: boolean;
 }
 
 function readActiveIds(): ActiveIds | null {
@@ -191,6 +239,37 @@ function humanTime(ts: number): string {
 }
 
 /**
+ * Map a server message row → the client `Message` shape the chat UI
+ * consumes. Carries `createdAt` through so per-run dividers in
+ * Session 6 can group by run timestamp.
+ */
+function apiMessageToClient(m: ApiMessage): Message {
+  return {
+    id: m.id,
+    role: m.role,
+    text: m.body,
+    time: formatMessageTime(m.createdAt),
+    createdAt: m.createdAt,
+    councilRole: m.councilRole,
+    councilSeat: m.councilSeat,
+    runId: m.runId,
+  };
+}
+
+/**
+ * Display-format a message timestamp the way the existing UI expects
+ * (e.g. "2:45 PM"). Kept local so tests / Storybook don't need to mock
+ * `toLocaleTimeString`.
+ */
+function formatMessageTime(ts: number): string {
+  const d = new Date(ts);
+  const hours12 = d.getHours() % 12 || 12;
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
+  return `${hours12}:${minutes} ${ampm}`;
+}
+
+/**
  * Convert the API's flat shape into the in-memory WorkspaceState the
  * existing UI expects.
  *
@@ -212,15 +291,29 @@ function hydrate(api: ApiWorkspaceResponse): WorkspaceState {
     sourcesByResearch.set(s.researchId, existing);
   }
 
-  const researches: Research[] = api.researches.map((r) => ({
-    id: r.id,
-    projectId: r.projectId,
-    name: r.name,
-    createdAt: r.createdAt,
-    sources: sourcesByResearch.get(r.id) ?? [],
-    messages: [blankIntroMessage()],
-    prompts: [],
-  }));
+  const messagesByResearch = new Map<string, Message[]>();
+  for (const m of api.messages ?? []) {
+    const existing = messagesByResearch.get(m.researchId) ?? [];
+    existing.push(apiMessageToClient(m));
+    messagesByResearch.set(m.researchId, existing);
+  }
+
+  const researches: Research[] = api.researches.map((r) => {
+    // Use server messages when present; otherwise fall back to the
+    // synthetic intro bubble so brand-new researches don't render as a
+    // sad empty pane. The intro is client-only and disappears as soon
+    // as the user sends their first message (which inserts a real row).
+    const serverMessages = messagesByResearch.get(r.id);
+    return {
+      id: r.id,
+      projectId: r.projectId,
+      name: r.name,
+      createdAt: r.createdAt,
+      sources: sourcesByResearch.get(r.id) ?? [],
+      messages: serverMessages && serverMessages.length > 0 ? serverMessages : [blankIntroMessage()],
+      prompts: [],
+    };
+  });
 
   const stored = readActiveIds();
   let activeProjectId = projects[0]?.id ?? '';
@@ -248,6 +341,29 @@ export function useWorkspace(): UseWorkspaceResult | null {
   // without stale closures pinning the React state at hook-creation time.
   const stateRef = useRef<WorkspaceState | null>(null);
   stateRef.current = state;
+
+  // Track the set of research ids that have a pending POST /api/messages
+  // in flight. The chat column reads `isTyping` (derived from this set
+  // membership for the active research) to decide whether to render the
+  // typing bubble.
+  const [pendingMessageResearchIds, setPendingMessageResearchIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+
+  // Track every message id we've already inserted into local state so
+  // the Realtime handler can dedupe rows that also arrived via a POST
+  // response. A Set is fine — message ids are UUIDs, and the chat
+  // history is bounded by what one user can read.
+  const seenMessageIdsRef = useRef<Set<string>>(new Set());
+
+  // Clerk session is required to mint Supabase JWTs for the Realtime
+  // channel. The client is recreated whenever the session reference
+  // changes (sign-out/sign-in), but stays stable across renders.
+  const { session } = useSession();
+  const supabase = useMemo<SupabaseClient | null>(
+    () => (session ? createBrowserSupabaseClient(session) : null),
+    [session],
+  );
 
   // -------------------------------------------------------------------------
   // Initial fetch
@@ -289,6 +405,94 @@ export function useWorkspace(): UseWorkspaceResult | null {
     if (!state) return;
     writeActiveIds({ projectId: state.activeProjectId, researchId: state.activeResearchId });
   }, [state]);
+
+  // -------------------------------------------------------------------------
+  // Track every message id that's currently in state so the Realtime
+  // handler below can dedupe rows that arrived via a POST response.
+  // We re-derive on each state change rather than try to surgically
+  // maintain the Set — cheap, and the state is bounded.
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (!state) return;
+    const seen = seenMessageIdsRef.current;
+    for (const r of state.researches) {
+      for (const m of r.messages) seen.add(m.id);
+    }
+  }, [state]);
+
+  // -------------------------------------------------------------------------
+  // Realtime subscription — listen for `INSERT` events on the messages
+  // table for any research the user owns (RLS handles the filtering)
+  // and append new rows to the right research. Skips rows whose id is
+  // already in `seenMessageIdsRef`, which catches the common case where
+  // the POST response added the row first.
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (!supabase) return;
+    let channel: RealtimeChannel | null = null;
+    try {
+      channel = supabase
+        .channel('siftie-messages')
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'messages' },
+          (payload) => {
+            const row = payload.new as {
+              id: string;
+              research_id: string;
+              role: 'user' | 'agent';
+              body: string;
+              created_at: string;
+              council_role: 'reviewer' | 'chair' | null;
+              council_seat: number | null;
+              run_id: string | null;
+            };
+            if (seenMessageIdsRef.current.has(row.id)) return;
+            seenMessageIdsRef.current.add(row.id);
+            const message = apiMessageToClient({
+              id: row.id,
+              researchId: row.research_id,
+              role: row.role,
+              body: row.body,
+              createdAt: new Date(row.created_at).getTime(),
+              councilRole: row.council_role,
+              councilSeat: row.council_seat,
+              runId: row.run_id,
+            });
+            setState((s) => {
+              if (!s) return s;
+              return {
+                ...s,
+                researches: s.researches.map((r) => {
+                  if (r.id !== row.research_id) return r;
+                  // Drop the synthetic intro bubble the moment a real
+                  // server message lands — its only job is to fill the
+                  // empty state.
+                  const realExisting = r.messages.filter((m) => !m.id.startsWith('m_'));
+                  return { ...r, messages: [...realExisting, message] };
+                }),
+              };
+            });
+            // If this is an agent message, the typing bubble can stop
+            // for this research — the agent has spoken.
+            if (row.role === 'agent') {
+              setPendingMessageResearchIds((prev) => {
+                if (!prev.has(row.research_id)) return prev;
+                const next = new Set(prev);
+                next.delete(row.research_id);
+                return next;
+              });
+            }
+          },
+        )
+        .subscribe();
+    } catch (err) {
+      console.error('[useWorkspace] realtime subscribe failed:', err);
+    }
+    return () => {
+      if (channel && supabase) supabase.removeChannel(channel);
+    };
+  }, [supabase]);
 
   // -------------------------------------------------------------------------
   // Derived selectors (only valid once state is loaded)
@@ -781,6 +985,144 @@ export function useWorkspace(): UseWorkspaceResult | null {
     }
   }, []);
 
+  // -------------------------------------------------------------------------
+  // Chat mutators (Session 4) — optimistic user message + POST + Realtime.
+  // -------------------------------------------------------------------------
+  const sendMessage = useCallback(async (text: string): Promise<void> => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const targetResearchId = stateRef.current?.activeResearchId;
+    if (!targetResearchId) throw new Error('No active research');
+
+    const tempId = 'm_tmp_' + Math.random().toString(36).slice(2, 10);
+    const now = Date.now();
+    const optimistic: Message = {
+      id: tempId,
+      role: 'user',
+      text: trimmed,
+      time: formatMessageTime(now),
+      createdAt: now,
+      pending: true,
+    };
+
+    // Insert the optimistic user bubble; drop the synthetic intro
+    // bubble (id starts with 'm_') the moment we have a real message
+    // to render so the chat doesn't show both.
+    setState((s) =>
+      s
+        ? {
+            ...s,
+            researches: s.researches.map((r) => {
+              if (r.id !== targetResearchId) return r;
+              const real = r.messages.filter((m) => !m.id.startsWith('m_'));
+              return { ...r, messages: [...real, optimistic] };
+            }),
+          }
+        : s,
+    );
+
+    // Mark this research as having a reply in flight. The chat column
+    // shows the typing bubble until either the response lands with
+    // `agentReplyExpected: false` or the agent's first message arrives
+    // (cleared inside the Realtime handler above).
+    setPendingMessageResearchIds((prev) => {
+      const next = new Set(prev);
+      next.add(targetResearchId);
+      return next;
+    });
+
+    try {
+      const res = await fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ researchId: targetResearchId, body: trimmed }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as {
+        messages?: ApiMessage[];
+        agentReplyExpected?: boolean;
+        warning?: string;
+        provider?: string;
+        message?: string;
+        error?: string;
+      };
+
+      if (!res.ok) {
+        // Roll back the optimistic insert so the user can retry.
+        setState((s) =>
+          s
+            ? {
+                ...s,
+                researches: s.researches.map((r) =>
+                  r.id === targetResearchId
+                    ? { ...r, messages: r.messages.filter((m) => m.id !== tempId) }
+                    : r,
+                ),
+              }
+            : s,
+        );
+        const error: Error & { code?: string; provider?: string } = new Error(
+          payload.message ?? `Send failed (${res.status})`,
+        );
+        error.code = payload.error;
+        error.provider = payload.provider;
+        throw error;
+      }
+
+      const incoming = payload.messages ?? [];
+      // Mark all canonical ids as seen BEFORE the setState so any
+      // Realtime echo that fires between now and the next render is
+      // dropped by the dedupe check.
+      for (const m of incoming) seenMessageIdsRef.current.add(m.id);
+
+      setState((s) => {
+        if (!s) return s;
+        const incomingIds = new Set(incoming.map((m) => m.id));
+        return {
+          ...s,
+          researches: s.researches.map((r) => {
+            if (r.id !== targetResearchId) return r;
+            // Replace the optimistic bubble with the canonical user row,
+            // and append any agent rows that came back in the same
+            // response (typically the 6 interview questions). Also drop
+            // any rows whose ids are about to be re-added — the
+            // Realtime channel may have already delivered them while
+            // the POST was awaiting, and we don't want duplicates.
+            const real = r.messages.filter(
+              (m) => m.id !== tempId && !incomingIds.has(m.id),
+            );
+            return {
+              ...r,
+              messages: [...real, ...incoming.map(apiMessageToClient)],
+            };
+          }),
+        };
+      });
+
+      // Clear the typing bubble unless the server said an agent reply
+      // is still pending (rare in Session 4 — agent reply currently
+      // arrives in the same POST response — but Sessions 6+ may
+      // background the heavy work).
+      if (!payload.agentReplyExpected) {
+        setPendingMessageResearchIds((prev) => {
+          if (!prev.has(targetResearchId)) return prev;
+          const next = new Set(prev);
+          next.delete(targetResearchId);
+          return next;
+        });
+      }
+    } catch (err) {
+      // Drop the typing bubble; the optimistic row is rolled back
+      // already (above) when res.ok was false.
+      setPendingMessageResearchIds((prev) => {
+        if (!prev.has(targetResearchId)) return prev;
+        const next = new Set(prev);
+        next.delete(targetResearchId);
+        return next;
+      });
+      throw err;
+    }
+  }, []);
+
   if (!state || !activeProject || !activeResearch) {
     return null;
   }
@@ -803,6 +1145,8 @@ export function useWorkspace(): UseWorkspaceResult | null {
     addSource,
     removeSource,
     reindexSource,
+    sendMessage,
+    isTyping: pendingMessageResearchIds.has(state.activeResearchId),
   };
 }
 

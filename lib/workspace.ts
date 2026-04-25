@@ -1,10 +1,10 @@
 /**
  * Server-side helpers for the workspace tables (`projects` + `researches`).
  *
- * As of Session 3 the bootstrap payload also includes every research's
- * sources, so the client can paint the full workspace in one round-trip
- * (no N+1 fetches when switching researches). Messages and prompts remain
- * client-side until Sessions 4 and 5.
+ * As of Session 4 the bootstrap payload includes every research's sources
+ * AND messages, so the client can paint the full workspace in a single
+ * round-trip (no N+1 fetches when switching researches). Prompts remain
+ * client-side until Session 7.
  *
  * We use the service-role client + manual `clerk_user_id` filters rather
  * than the Clerk-scoped client so behaviour is consistent with `lib/keys.ts`
@@ -13,6 +13,7 @@
  * `requireUser()` first.
  */
 import 'server-only';
+import { listMessagesForResearches, type MessageRow } from './messages';
 import { listSourcesForResearches, type SourceRow } from './sources';
 import { createServiceRoleSupabaseClient } from './supabase/server';
 
@@ -37,6 +38,13 @@ export interface WorkspacePayload {
    * within each research. Empty for fresh users / fresh researches.
    */
   sources: SourceRow[];
+  /**
+   * Every persisted chat message for every research the user owns,
+   * oldest-first within each research (chat order). Empty for brand-new
+   * researches where the user hasn't sent anything yet — the UI shows
+   * a synthetic intro bubble in that case.
+   */
+  messages: MessageRow[];
 }
 
 const DEFAULT_PROJECT_NAME = 'My first project';
@@ -90,9 +98,14 @@ export async function fetchOrSeedWorkspace(clerkUserId: string): Promise<Workspa
     }
   }
 
-  // Hydrate sources for every research in one query (avoids N+1).
+  // Hydrate sources + messages for every research in parallel (avoids
+  // N+1 fetches and runs both queries concurrently — they don't depend
+  // on each other so there's no reason to serialise them).
   const researchIds = finalResearches.map((r) => r.id);
-  const sources = await listSourcesForResearches(researchIds);
+  const [sources, messages] = await Promise.all([
+    listSourcesForResearches(researchIds),
+    listMessagesForResearches(researchIds),
+  ]);
 
   return {
     projects: projects.map((p) => ({
@@ -107,6 +120,7 @@ export async function fetchOrSeedWorkspace(clerkUserId: string): Promise<Workspa
       createdAt: new Date(r.created_at).getTime(),
     })),
     sources,
+    messages,
   };
 }
 
@@ -136,8 +150,9 @@ async function seedInitialWorkspace(clerkUserId: string): Promise<WorkspacePaylo
         createdAt: new Date(research.created_at).getTime(),
       },
     ],
-    // Fresh user has no sources yet — saves one round-trip.
+    // Fresh user has no sources or messages yet — saves two round-trips.
     sources: [],
+    messages: [],
   };
 }
 

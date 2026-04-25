@@ -15,6 +15,7 @@ Logo/
 logo/
 !public/logo/
 !public/logo/*.svg
+Images/
 
 # clerk configuration (can include secrets)
 /.clerk/

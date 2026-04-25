@@ -14,7 +14,7 @@ import { TopBar } from './components/TopBar';
 import { useTheme } from './hooks/useTheme';
 import { useIsDesktop } from './hooks/useViewport';
 import { useWorkspace, type AddSourcePayload, type UseWorkspaceResult } from './hooks/useWorkspace';
-import type { Message, PortfolioPrompt, Source } from './types';
+import type { PortfolioPrompt, Source } from './types';
 
 type MobileTab = 'sources' | 'chat' | 'prompts';
 
@@ -48,7 +48,6 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
   const [modalInitialTab, setModalInitialTab] = useState<AddTab>('pdf');
   const [editingSource, setEditingSource] = useState<Source | null>(null);
   const [toast, setToast] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
   const [newPromptId, setNewPromptId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [pendingRenameId, setPendingRenameId] = useState<string | null>(null);
@@ -69,13 +68,15 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
   const sources = ws.activeResearch.sources;
   const messages = ws.activeResearch.messages;
   const prompts = ws.activeResearch.prompts;
+  const isTyping = ws.isTyping;
   const pendingSource = useMemo(() => sources.find((s) => s.pending), [sources]);
   const analyzing = Boolean(pendingSource);
   const analyzingId = pendingSource?.id ?? null;
 
   // Reset transient UI state when switching research sessions.
+  // `isTyping` is per-research inside `useWorkspace`, so it doesn't need
+  // a manual reset here — switching just reads a different slot.
   useEffect(() => {
-    setIsTyping(false);
     setGenerating(false);
     setNewPromptId(null);
     setEditingSource(null);
@@ -139,24 +140,27 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
     showToast('Source updated');
   };
 
-  const sendMessage = (text: string) => {
-    const now = new Date();
-    const t = `${now.getHours() % 12 || 12}:${String(now.getMinutes()).padStart(2, '0')} ${now.getHours() >= 12 ? 'PM' : 'AM'}`;
-    const userMsg: Message = { id: 'u_' + Date.now().toString(36), role: 'user', time: t, text };
-    ws.updateActiveResearch((r) => ({ ...r, messages: [...r.messages, userMsg] }));
-    setIsTyping(true);
-    setTimeout(() => {
-      const replies = [
-        "Got it. I'll fold that into the next pass — adding two prompts that lean on the price gap and one that anchors on recycled-material credibility.",
-        "Useful. That changes the persona prompts in particular — 'beginner' is doing a lot of work in the queries; I'll swap in 'late starter' and 'casual miler' variants.",
-        "Noted. I'll re-cluster around that. Expect three new sustainability prompts and a refreshed comparison cluster within the next 30 seconds.",
-      ];
-      const reply = replies[Math.floor(Math.random() * replies.length)]!;
-      const replyMsg: Message = { id: 'a_' + Date.now().toString(36), role: 'agent', time: t, text: reply };
-      ws.updateActiveResearch((r) => ({ ...r, messages: [...r.messages, replyMsg] }));
-      setIsTyping(false);
-    }, 1400);
-  };
+  const sendMessage = useCallback(
+    async (text: string) => {
+      try {
+        await ws.sendMessage(text);
+      } catch (err) {
+        const maybe = err as Error & { code?: string; provider?: string };
+        // The interview generator needs Gemini — surface a guided
+        // error if the user hasn't configured it yet so they don't
+        // wonder why nothing happened.
+        if (maybe.code === 'missing_key') {
+          showToast(`Missing ${maybe.provider ?? 'provider'} key`);
+          window.location.href = '/settings/api-keys?onboarding=1';
+        } else if (maybe.code === 'quota_exhausted') {
+          showToast('Provider quota exhausted — try a different key');
+        } else {
+          showToast('Send failed');
+        }
+      }
+    },
+    [ws, showToast],
+  );
 
   const generateMore = () => {
     setGenerating(true);
