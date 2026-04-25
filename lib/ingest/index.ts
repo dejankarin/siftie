@@ -20,6 +20,7 @@ import 'server-only';
 import { contextDoc, type ContextDocCallOptions } from '../gemini';
 import { parseDocx } from '../docx';
 import { extractUrl, TavilyExtractError } from '../tavily';
+import { classifyProviderError, type ProviderErrorCode, type ProviderName } from '../provider-errors';
 import type { ContextDoc } from './schema';
 
 export type IngestKind = 'pdf' | 'url' | 'doc' | 'md';
@@ -99,8 +100,11 @@ export class IngestError extends Error {
       | 'extract_failed'
       | 'parse_failed'
       | 'gemini_failed'
-      | 'invalid_input',
+      | 'invalid_input'
+      | ProviderErrorCode,
     public readonly cause?: unknown,
+    public readonly provider?: ProviderName,
+    public readonly status = code === 'invalid_input' ? 400 : 500,
   ) {
     super(message);
     this.name = 'IngestError';
@@ -163,10 +167,13 @@ async function ingestPdf(
       geminiOpts,
     );
   } catch (err) {
+    const providerError = classifyProviderError(err, 'gemini');
     throw new IngestError(
-      err instanceof Error ? err.message : 'Gemini failed on PDF',
-      'gemini_failed',
+      providerError.message,
+      providerError.code,
       err,
+      providerError.provider,
+      providerError.status,
     );
   }
   return {
@@ -263,10 +270,13 @@ async function ingestUrl(
       geminiOpts,
     );
   } catch (err) {
+    const providerError = classifyProviderError(err, 'gemini');
     throw new IngestError(
-      err instanceof Error ? err.message : 'Gemini failed on URL content',
-      'gemini_failed',
+      providerError.message,
+      providerError.code,
       err,
+      providerError.provider,
+      providerError.status,
     );
   }
 
@@ -323,10 +333,13 @@ async function ingestDoc(
       geminiOpts,
     );
   } catch (err) {
+    const providerError = classifyProviderError(err, 'gemini');
     throw new IngestError(
-      err instanceof Error ? err.message : 'Gemini failed on .docx',
-      'gemini_failed',
+      providerError.message,
+      providerError.code,
       err,
+      providerError.provider,
+      providerError.status,
     );
   }
 
@@ -365,10 +378,13 @@ async function ingestMarkdown(
       geminiOpts,
     );
   } catch (err) {
+    const providerError = classifyProviderError(err, 'gemini');
     throw new IngestError(
-      err instanceof Error ? err.message : 'Gemini failed on markdown',
-      'gemini_failed',
+      providerError.message,
+      providerError.code,
       err,
+      providerError.provider,
+      providerError.status,
     );
   }
 

@@ -193,8 +193,9 @@ export const POST = withUser(async ({ userId }, req) => {
         message,
       },
     });
-    const status = code === 'invalid_input' ? 400 : 500;
-    return Response.json({ error: code, message }, { status });
+    const status = err instanceof IngestError ? err.status : 500;
+    const provider = err instanceof IngestError ? err.provider : undefined;
+    return Response.json({ error: code, message, provider }, { status });
   }
 });
 

@@ -150,7 +150,9 @@ export const POST = withUser(
           message,
         },
       });
-      return Response.json({ error: code, message }, { status: 500 });
+      const status = err instanceof IngestError ? err.status : 500;
+      const provider = err instanceof IngestError ? err.provider : undefined;
+      return Response.json({ error: code, message, provider }, { status });
     }
   },
 );
