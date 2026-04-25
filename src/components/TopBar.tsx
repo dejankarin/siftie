@@ -1,3 +1,4 @@
+import { UserButton } from '@clerk/nextjs';
 import type { Theme } from '../hooks/useTheme';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -23,16 +24,29 @@ export function TopBar({ theme, onToggleTheme }: TopBarProps) {
         <span className="w-px h-5 bg-[var(--line)] mx-1"></span>
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <span className="w-px h-5 bg-[var(--line)] mx-1"></span>
-        <button
-          type="button"
-          className="btn-ghost w-8 h-8 p-0 rounded-full flex items-center justify-center"
-          aria-label="User account"
-        >
-          <span className="w-7 h-7 rounded-full bg-[var(--surface-3)] text-[var(--ink-2)] text-[10.5px] font-semibold flex items-center justify-center overflow-hidden">
-            EM
-          </span>
-        </button>
+        <UserButton appearance={{ elements: { avatarBox: 'w-7 h-7' } }}>
+          <UserButton.MenuItems>
+            <UserButton.Link
+              label="API Keys"
+              labelIcon={<KeyGlyph />}
+              href="/settings/api-keys"
+            />
+          </UserButton.MenuItems>
+        </UserButton>
       </div>
     </header>
+  );
+}
+
+// Tiny inline key glyph for the "API Keys" menu item (Clerk's labelIcon
+// expects a 16x16 SVG; importing lucide-react would bloat the bundle for
+// this single icon).
+function KeyGlyph() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="7.5" cy="15.5" r="5.5" />
+      <path d="m21 2-9.6 9.6" />
+      <path d="m15.5 7.5 3 3L22 7l-3-3" />
+    </svg>
   );
 }
