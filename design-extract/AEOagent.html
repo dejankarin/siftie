@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>AEOagent</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  :root {
+    /* Logo palette: AEO in #000000 ("black"), "agent" in #0EA5E9 (sky-500).
+       Neutrals are kept cool to feel native to the sky accent. */
+    --bg: oklch(98.5% 0.004 240);
+    --surface: #ffffff;
+    --ink: #0B0F14;            /* near-black, slight cool cast */
+    --ink-2: oklch(36% 0.012 240);
+    --ink-3: oklch(58% 0.012 240);
+    --line: oklch(92% 0.008 240);
+    --line-2: oklch(95.5% 0.005 240);
+    --accent: #0EA5E9;          /* sky-500 — straight from the logo */
+    --accent-ink: #0369A1;      /* sky-700, for tinted text on light bg */
+    --accent-soft: #E0F2FE;     /* sky-100, for chips and soft fills */
+    --accent-softer: #F0F9FF;   /* sky-50 */
+  }
+  html, body { background: var(--bg); color: var(--ink); }
+  body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; font-feature-settings: 'cv11','ss01','ss03'; -webkit-font-smoothing: antialiased; }
+  .font-serif { font-family: 'Instrument Serif', 'Times New Roman', serif; font-feature-settings: normal; }
+  .font-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+  .col-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+  }
+  .src-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+  }
+  .src-card:hover { border-color: oklch(85% 0.005 70); box-shadow: 0 1px 0 rgba(0,0,0,0.02), 0 8px 24px -16px rgba(20,15,25,0.12); }
+  .pill { border: 1px solid var(--line); border-radius: 999px; }
+  .chip { border-radius: 999px; padding: 4px 10px; font-size: 11.5px; font-weight: 500; letter-spacing: 0.01em; }
+
+  /* scrollbar */
+  .scroll-y { overflow-y: auto; scrollbar-width: thin; scrollbar-color: oklch(85% 0.005 70) transparent; }
+  .scroll-y::-webkit-scrollbar { width: 8px; }
+  .scroll-y::-webkit-scrollbar-thumb { background: oklch(88% 0.005 70); border-radius: 999px; }
+  .scroll-y::-webkit-scrollbar-track { background: transparent; }
+
+  /* dotted divider for hand-drawn feel */
+  .dot-divider { background-image: radial-gradient(currentColor 1px, transparent 1px); background-size: 6px 6px; height: 1px; opacity: .25; }
+
+  /* subtle gradient placeholder stripes */
+  .stripes-placeholder {
+    background-image: repeating-linear-gradient(135deg, oklch(96% 0.005 70) 0 8px, oklch(98% 0.005 70) 8px 16px);
+  }
+
+  /* typing indicator */
+  @keyframes blink { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+  .typing-dot { animation: blink 1.2s infinite ease-in-out; }
+  .typing-dot:nth-child(2) { animation-delay: .15s; }
+  .typing-dot:nth-child(3) { animation-delay: .3s; }
+
+  /* analyzing shimmer */
+  @keyframes shimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
+  .shimmer-bar { background: linear-gradient(90deg, transparent, oklch(94% 0.01 340), transparent); background-size: 200px 100%; animation: shimmer 2s linear infinite; }
+
+  /* slide up for added prompt */
+  @keyframes slideUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .anim-slide-up { animation: slideUp .25s ease-out; }
+
+  /* toast */
+  @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+  .toast { animation: toastIn .2s ease-out; }
+
+  /* button press */
+  .btn-primary { background: var(--ink); color: white; border-radius: 12px; transition: transform .08s ease, background-color .15s ease; }
+  .btn-primary:hover { background: oklch(28% 0.01 60); }
+  .btn-primary:active { transform: translateY(1px); }
+  .btn-ghost { border-radius: 12px; transition: background-color .15s ease; }
+  .btn-ghost:hover { background: oklch(95% 0.004 70); }
+
+  /* focus ring */
+  .focus-ring:focus { outline: none; box-shadow: 0 0 0 3px #BAE6FD; border-color: var(--accent) !important; }
+
+  /* hide scrollbars on chip rails */
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { scrollbar-width: none; }
+
+  /* tab bar safe-area */
+  .tabbar-safe { padding-bottom: max(env(safe-area-inset-bottom), 0px); }
+</style>
+</head>
+<body class="min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel" src="aeo-icons.jsx"></script>
+  <script type="text/babel" src="aeo-data.jsx"></script>
+  <script type="text/babel" src="aeo-sources.jsx"></script>
+  <script type="text/babel" src="aeo-chat.jsx"></script>
+  <script type="text/babel" src="aeo-prompts.jsx"></script>
+  <script type="text/babel" src="aeo-app.jsx"></script>
+</body>
+</html>

@@ -1,5 +1,38 @@
 # aeo-agent.com
 
+A three-column research UI for **AEOagent** — a chat-driven prompt-portfolio builder that turns brand sources (PDFs, URLs, pasted text, internal DB) into AI-engine-ready prompts. Built with Vite + React + TypeScript + Tailwind.
+
+## Run the UI locally
+
+```sh
+npm install
+npm run dev
+```
+
+Then open http://127.0.0.1:5173/.
+
+Other scripts:
+
+- `npm run build` — typecheck and bundle to `dist/`
+- `npm run preview` — preview the production bundle on `http://127.0.0.1:4173/`
+
+### Project layout
+
+```
+src/
+  App.tsx              # state orchestration + layout
+  components/          # TopBar, MobileTopBar, MobileTabBar
+                       # SourcesColumn, ChatColumn, PromptsColumn
+                       # AddSourceModal, EditSourceModal, ThemeToggle, Toast
+  hooks/               # useTheme, useViewport
+  data/mock.ts         # Loftway demo content
+  index.css            # design tokens + light/dark theme
+public/assets/         # AEOagent logos (light + dark)
+design-extract/        # original HTML+JSX prototype (reference only)
+```
+
+The light/dark theme is driven by CSS variables under `:root` and `[data-theme="dark"]` in `src/index.css`. The toggle persists to `localStorage` and falls back to `prefers-color-scheme`.
+
 ## Contributor setup
 
 This repo uses [Entire](https://entire.io) to capture AI-agent sessions alongside Git commits. Hooks for Cursor, Claude Code, Codex, Factory AI Droid, and Gemini CLI are committed in this repo and are skipped automatically if the `entire` CLI is not installed.
