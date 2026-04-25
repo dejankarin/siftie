@@ -16,8 +16,18 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)] flex flex-col">
       <header className="flex items-center justify-between px-6 py-3 border-b border-[var(--line)] bg-[var(--bg)]/80 backdrop-blur sticky top-0 z-20">
-        <Link href="/" aria-label="Siftie home" className="inline-flex items-center">
-          <img src="/logo/Siftie-logo-light.svg" alt="Siftie" className="h-6 w-auto" />
+        <Link href="/" aria-label="Siftie home" className="inline-flex items-center h-7">
+          <img
+            src="/logo/Siftie-logo-light.svg"
+            alt="Siftie"
+            className="theme-logo-light h-7 w-auto"
+          />
+          <img
+            src="/logo/Siftie-logo-dark.svg"
+            alt=""
+            aria-hidden="true"
+            className="theme-logo-dark h-7 w-auto"
+          />
         </Link>
         <div className="flex items-center gap-3">
           <Link
