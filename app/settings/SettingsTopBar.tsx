@@ -25,8 +25,9 @@ export function SettingsTopBar() {
         <div className="flex items-center gap-1.5">
           <Link
             href="/app"
-            className="btn-ghost px-2.5 py-1.5 text-[12.5px] text-[var(--ink-2)] hover:text-[var(--ink)]"
+            className="btn-primary inline-flex items-center gap-1.5 px-3 h-8 text-[12.5px] font-medium"
           >
+            <ArrowLeftIcon />
             Back to home
           </Link>
           <span className="w-px h-5 bg-[var(--line)] mx-1" />
@@ -36,6 +37,24 @@ export function SettingsTopBar() {
         </div>
       </div>
     </header>
+  );
+}
+
+function ArrowLeftIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M19 12H5M12 19l-7-7 7-7" />
+    </svg>
   );
 }
 
