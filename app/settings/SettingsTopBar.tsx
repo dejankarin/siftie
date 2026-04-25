@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { UserButton } from '@clerk/nextjs';
 import { ThemeToggle } from '@/src/components/ThemeToggle';
 import { useOnlineStatus } from '@/src/hooks/useOnlineStatus';
@@ -17,12 +18,17 @@ export function SettingsTopBar() {
       {!online && <OfflineBanner />}
       <div className="flex items-center justify-between px-6 py-3">
         <div className="flex items-center gap-3">
-          <img src={logo} alt="Siftie" style={{ height: '18px', width: 'auto' }} />
+          <Link href="/app" aria-label="Back to workspace" className="inline-flex items-center">
+            <img src={logo} alt="Siftie" style={{ height: '18px', width: 'auto' }} />
+          </Link>
         </div>
         <div className="flex items-center gap-1.5">
-          <button type="button" className="btn-ghost px-2.5 py-1.5 text-[12.5px] text-[var(--ink-2)]">
-            Saved 2 min ago
-          </button>
+          <Link
+            href="/app"
+            className="btn-ghost px-2.5 py-1.5 text-[12.5px] text-[var(--ink-2)] hover:text-[var(--ink)]"
+          >
+            Back to home
+          </Link>
           <span className="w-px h-5 bg-[var(--line)] mx-1" />
           <ThemeToggle theme={theme} onToggle={toggle} />
           <span className="w-px h-5 bg-[var(--line)] mx-1" />
