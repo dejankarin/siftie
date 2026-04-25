@@ -16,10 +16,18 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)] flex flex-col">
       <header className="flex items-center justify-between px-6 py-3 border-b border-[var(--line)] bg-[var(--bg)]/80 backdrop-blur sticky top-0 z-20">
-        <Link href="/app" className="font-[Instrument_Serif] text-[22px] tracking-tight">
-          Siftie
+        <Link href="/" aria-label="Siftie home" className="inline-flex items-center">
+          <img src="/logo/Siftie-logo-light.svg" alt="Siftie" className="h-6 w-auto" />
         </Link>
-        <UserButton appearance={{ elements: { avatarBox: 'w-7 h-7' } }} />
+        <div className="flex items-center gap-3">
+          <Link
+            href="/"
+            className="px-3 py-1.5 rounded-[10px] border border-[var(--line)] bg-[var(--surface-1)] text-[13px] font-medium text-[var(--ink)] hover:bg-[var(--surface-2)] hover:border-[var(--line-strong)] transition-colors"
+          >
+            Back to home
+          </Link>
+          <UserButton appearance={{ elements: { avatarBox: 'w-7 h-7' } }} />
+        </div>
       </header>
 
       <div className="flex-1 flex flex-col md:flex-row max-w-[960px] w-full mx-auto px-6 py-10 gap-10">
