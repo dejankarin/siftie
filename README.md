@@ -24,7 +24,7 @@ Built and deployed in 48-hour sprints, tracked as nine "sessions". As of **commi
 | —   | Deep-link routing `/app/[projectId]/[researchId]` + `sources` Realtime sync | Shipped |
 | 7 | Prompts column live (dynamic HitsBar, Show-all drawer, CSV export) | Shipped |
 | 8 | Reply router (Tavily web search) + landing polish + mobile pass | Shipped |
-| 9 | Demo prep + PostHog dashboard + 2 evals + 1 cluster view + final README | Pending |
+| 9 | Demo prep — PostHog Siftie Live dashboard (4 live tiles), 2 LLM Analytics evals (Chair llm-judge + ContextDoc hog), cluster view, judge Q&A in README | Shipped (analytics) — real-brand end-to-end demo run + 3-min screen recording still pending |
 
 Beyond the original plan, the following also shipped:
 
@@ -45,6 +45,7 @@ Beyond the original plan, the following also shipped:
 - **Session 8 reply router** — `lib/reply-router.ts` runs Gemini 3 Flash with structured output to classify every non-first chat message into `chat_only` / `refine_prompts` / `rebaseline` / `run_research` / `web_search`. The `web_search` branch fans out to `lib/tavily.ts#searchWeb` + a second Gemini summariser (`summariseSearchHits`) that writes a 2–4 sentence reply with inline `[n]` citations and a Markdown `Sources:` footer. `POST /api/messages` returns the lead-in agent reply immediately and runs all side effects (web search summary, `runResearchPipeline` for `run_research` / `rebaseline`) behind `waitUntil`, with follow-up bubbles arriving via Supabase Realtime. PostHog events: `reply_router_decision`, `reply_router_failed`, `reply_router_websearch_completed`, `reply_router_websearch_failed`, `reply_router_run_research_failed` — all carry `$ai_trace_id` so they correlate with the `$ai_generation` events in LLM Analytics. Defensive: when Gemini returns `web_search` but the user has no Tavily key, the router downgrades to `chat_only` so the user always gets a reply.
 - **Session 8 landing page** — `app/page.tsx` is a server component (Clerk `auth()` redirects signed-in users to `/app`) with sticky nav (logo + theme toggle + Log in + Sign up), a hero (badge, headline, tagline, primary CTA, BYOK reassurance), a three-step value-prop grid (Add sources → Chat with the agent → Get a tested portfolio), and a token-driven HTML mock of the 3-column workspace that swaps with the theme toggle so it never goes stale relative to the real app.
 - **Session 8 mobile pass** — `AddSourceModal` switched to a flex-column with `max-h-[calc(100dvh-2rem)]` + scrollable body so the Cancel/Add buttons stay anchored on landscape phones; `MobileTopBar` placeholder "More" button replaced with the real Clerk `<UserButton />` (with the API Keys link mirroring desktop); mobile `<main>` padding bumped to `pb-[calc(58px+env(safe-area-inset-bottom))]` so the chat composer clears the iPhone home indicator; `MobileTabBar` tab buttons gain `aria-current` + visible focus styling; `ChatColumn` composer wrapper uses `focus-within:shadow-[0_0_0_3px_var(--focus-ring)]` and the Send button gains `focus-visible:ring`.
+- **Session 9 demo prep** — provisioned the **Siftie Live** PostHog dashboard with four live tiles (sign-up funnel, runs/day succeed-vs-fail, avg LLM cost per run, top brand-category clusters) plus two automatic LLM Analytics evaluations: an **LLM-judge** that scores every `tag: council_chair` `$ai_generation` against a 5-criterion rubric (≥6 picks, substantive summary, meaningful `councilNote` rationales, topical diversity, schema validity) and a **deterministic Hog eval** that validates every `tag: context_doc` `$ai_generation` against the production `ContextDoc` schema (title + ≥50-char summary + ≥3 topics + ≥1 entity + ≥3 facts + rawExcerpt). Both evals enabled in production; the cluster tile rides the existing `Default - generations` LLM Analytics clustering job. See **Demo dashboard & evals** below for URLs and the **Demo / Judge Q&A** section for talking points.
 
 ## Run locally
 
@@ -251,6 +252,55 @@ Settings → Privacy exposes a single toggle that maps to `user_profiles.posthog
 - **OFF:** Only metadata (model, tokens, cost, latency, run id, tags) — bodies are stripped via `posthogPrivacyMode: true`.
 
 Either way, we **never** capture decrypted provider keys, raw uploaded files, email, or name.
+
+## Demo dashboard & evals
+
+PostHog project **Siftie** (id 166503) on **eu.posthog.com**. Provisioned via the PostHog MCP, all wired to events the app already emits (no extra instrumentation).
+
+**Dashboard:** [Siftie Live](https://eu.posthog.com/project/166503/dashboard/644165) — pinned, four tiles:
+
+| Tile | Type | Backing query | What it shows |
+|---|---|---|---|
+| [Sign-up funnel](https://eu.posthog.com/project/166503/insights/oWRC6dKj) | Funnel (4 steps, 14-day window) | `$pageview /` → `$pageview /sign-up` → `key_added (provider=gemini)` → `research_run_complete` | Acquisition: how many landing visitors actually finish a research run. |
+| [Research runs per day (succeeded vs. failed)](https://eu.posthog.com/project/166503/insights/4wBsqnk7) | Trends (stacked bar, `day` interval, 14d) | `research_run_complete` + `research_run_failed` events from `lib/research.ts` | Headline reliability number — the success/failure ratio is the most important signal after the 3-model fast Council swap. |
+| [Avg LLM cost per research run (USD)](https://eu.posthog.com/project/166503/insights/iFQOAixL) | HogQL line graph | `avg(sum($ai_total_cost_usd))` grouped by `$ai_trace_id` (= one Siftie run; set in `lib/openrouter.ts`) and bucketed by day | Economics: validates the swap to the fast Council didn't blow the per-run budget. Demo target ≪ $0.10/run. |
+| [Top brand categories (LLM Analytics clusters)](https://eu.posthog.com/project/166503/insights/epdsd3d2) | HogQL table | Latest `Default - generations` `$ai_generation_clusters` event, unrolled via `arrayJoin(JSONExtractArrayRaw($ai_clusters))` | Topic mix across every Siftie LLM call (ideate prompts, context docs, council reviews). For interactive drill-down: [LLM Analytics → Clusters](https://eu.posthog.com/project/166503/llm-analytics/clusters). |
+
+**Evaluations** (both auto-run on every matching `$ai_generation` event; results land as `$ai_evaluation` events):
+
+| Eval | Type | Trigger | What it checks |
+|---|---|---|---|
+| [Council Chair output quality](https://eu.posthog.com/project/166503/llm-analytics/evaluations) | LLM-judge (`gemini-3-flash-preview`) | `tag = council_chair` | 5-criterion pass/fail rubric: `summary` ≥40 chars and references the council's reasoning · `picks` has ≥6 entries · every `councilNote` ≥20 chars · picks topically diverse · valid JSON. |
+| [ContextDoc completeness](https://eu.posthog.com/project/166503/llm-analytics/evaluations) | Hog (deterministic) | `tag = context_doc` | Parses the nested `output → choices[1].content[1].text` JSON and asserts the production `ContextDoc` schema (title + summary ≥50 chars + ≥3 topics + ≥1 entity + ≥3 facts + rawExcerpt). FAIL signals the Gemini ingest prompt or the source itself is too thin. |
+
+The Hog eval was test-driven against five real production events first via `evaluation-test-hog` — every Galaxy S26 Ultra and Nothing Phone ContextDoc passes (8–10 topics, 8–10 entities, 10–15 facts).
+
+> **Two follow-ups** for the dashboard owner:
+>
+> 1. **Provider key for the Chair eval.** The LLM-judge runs on PostHog's infrastructure, not Siftie's, so it needs its own key. Add a Gemini key under [eu.posthog.com → Settings → Provider keys](https://eu.posthog.com/project/166503/settings/environment#provider-keys) (or swap the eval to OpenRouter / OpenAI in the eval definition).
+> 2. **Cluster tile populates on next clustering run.** PostHog runs the default clustering jobs on a schedule; the table is empty until the first `Default - generations` job sees enough $ai_generation events. As traffic grows it fills in automatically.
+
+## Demo / Judge Q&A
+
+Three questions every judge tends to ask, with the honest answer:
+
+**Q1 · Why a 3-model "fast" Council instead of all-frontier reviewers?**
+A 4-seat all-frontier Council (`gpt-5.4` + `gemini-3.1-pro-preview` + `claude-opus-4.5` + `grok-4`) was spec'd in the original plan, and we shipped it through Session 6. End-to-end it ran ~60–90s per research, which made the live agent feel like a backend job instead of a real-time collaborator. We swapped to **`openai/gpt-5.4-mini`** + **`google/gemini-2.5-flash`** + **`anthropic/claude-haiku-4.5`** — one fast tier per major vendor, ~3–5× faster wall-clock, still proves the cross-vendor disagreement thesis. The Chair stays in the OpenAI family (`gpt-5.4-mini`) so it shares reasoning lineage with the Ideate primary. Going back to the frontier lineup is a one-line edit to `COUNCIL_MODELS` in `lib/openrouter.ts`; the DB constraint already permits seats 1–4. The [avg-cost tile](https://eu.posthog.com/project/166503/insights/iFQOAixL) on the dashboard quantifies the trade-off in dollars per run.
+
+**Q2 · How do you know the Council isn't just rubber-stamping itself?**
+Three independent signals, all production-instrumented:
+1. **Anonymised reviewers.** Stage 1 reviewers see only the candidate prompts + the source ContextDocs, not each other's verdicts. Stage 2 reviewers see anonymised peer verdicts (`Reviewer A / B / C`, no model names). The Chair sees everything but doesn't know which seat is which model. So agreement is structural, not social.
+2. **The Chair eval.** Every `council_chair` `$ai_generation` is auto-graded by an external Gemini Flash judge against a 5-criterion rubric — including topical diversity. A judge FAIL means the Chair collapsed onto a single cluster, which is exactly the rubber-stamp pathology. Results stream into PostHog as `$ai_evaluation` events; we can surface them as a fifth dashboard tile or fire a Slack alert when pass rate dips below threshold.
+3. **The ContextDoc Hog eval.** A deterministic upstream check that the Gemini source-indexer is producing substantive grounding (≥3 topics, ≥1 entity, ≥3 facts). If the Council picks look identical, this tells us whether it's because the Council is lazy or because the sources were thin.
+
+**Q3 · This is BYOK. What happens at scale, and what's actually in your trust boundary?**
+Every paying user pastes their own OpenAI / Gemini / OpenRouter / Tavily / (optionally) Peec keys. Keys are encrypted at rest with AES-256-GCM (`lib/crypto.ts`, master key in `KEY_ENCRYPTION_KEY`), decrypted only inside server route handlers, never logged, never sent to PostHog (privacy mode is enforced server-side per user via `user_profiles.posthog_capture_llm`). At inference time:
+- Provider calls fan out from Vercel Fluid Compute functions with each request's own key.
+- LLM Analytics events go to PostHog Cloud EU with a `posthogTraceId = research_<runId>` so per-tenant cost attribution is automatic — that's literally what the [avg-cost tile](https://eu.posthog.com/project/166503/insights/iFQOAixL) reads.
+- Supabase RLS scopes every read/write on `auth.jwt() ->> 'sub'` (Clerk user id) so a misconfigured client can't leak across tenants.
+- We never store raw uploaded files — only the structured ContextDoc + a 500-char excerpt — so a database breach doesn't expose the brand's source material.
+
+Scale-out story: nothing in the request path is single-tenant — Clerk, Supabase, Fluid Compute, OpenRouter, PostHog all scale per-tenant out of the box. The bottleneck would be Peec's per-key rate limits, which we already handle via `lib/peec-baseline.ts` exponential backoff and the `peec_call` PostHog event for monitoring.
 
 ## Theming
 
