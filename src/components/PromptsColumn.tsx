@@ -1,4 +1,4 @@
-import { useMemo, useState, type MouseEvent } from 'react';
+import { useCallback, useMemo, useState, type MouseEvent } from 'react';
 import { PROMPT_FILTERS } from '../data/mock';
 import type { PortfolioPrompt, PromptCluster, PromptFilter } from '../types';
 
@@ -159,6 +159,8 @@ export interface PromptsColumnProps {
   totalChannels: number;
   /** Latest run status; drives the "Working…" / "Failed" banner. */
   runStatus: 'pending' | 'running' | 'complete' | 'failed' | null | undefined;
+  /** Latest completed (or in-flight) run id — required for Markdown download. */
+  latestRunId: string | null | undefined;
 }
 
 export function PromptsColumn({
@@ -166,9 +168,14 @@ export function PromptsColumn({
   onToast,
   totalChannels,
   runStatus,
+  latestRunId,
 }: PromptsColumnProps) {
   const [filter, setFilter] = useState<PromptFilter>('All');
   const [sort, setSort] = useState<'Cluster' | 'Intent' | 'Hits'>('Cluster');
+  const [downloading, setDownloading] = useState(false);
+
+  const canDownloadReport =
+    runStatus === 'complete' && prompts.length > 0 && !!latestRunId;
 
   const filtered = useMemo(() => {
     let arr = filter === 'All' ? prompts : prompts.filter((p) => p.cluster === filter);
@@ -204,6 +211,37 @@ export function PromptsColumn({
     onToast('Copied to clipboard');
   };
 
+  const downloadReport = useCallback(async () => {
+    if (!latestRunId || !canDownloadReport) return;
+    setDownloading(true);
+    try {
+      const res = await fetch(`/api/research/${latestRunId}/report`, {
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { message?: string };
+        const msg = typeof j.message === 'string' ? j.message : `Download failed (${res.status})`;
+        onToast(msg);
+        return;
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get('Content-Disposition');
+      const match = cd?.match(/filename="([^"]+)"/);
+      const filename = match?.[1] ?? `siftie-report-${latestRunId.slice(0, 8)}.md`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      onToast('Report downloaded');
+    } catch {
+      onToast('Download failed');
+    } finally {
+      setDownloading(false);
+    }
+  }, [latestRunId, canDownloadReport, onToast]);
+
   return (
     <section className="flex flex-col h-full min-h-0">
       <header className="px-5 pt-5 pb-3">
@@ -215,9 +253,6 @@ export function PromptsColumn({
             </div>
             <p className="text-[12px] text-[var(--ink-3)] mt-1 leading-snug">Generated from your sources. Test in ChatGPT, Perplexity, and Claude.</p>
           </div>
-          <button type="button" className="btn-ghost px-2 py-1 shrink-0 text-[11.5px] text-[var(--ink-3)] hover:text-[var(--ink)]" aria-label="More">
-            More
-          </button>
         </div>
 
         <div className="mt-3 px-3 py-2.5 rounded-xl bg-[var(--surface-2)] flex items-center gap-3">
@@ -310,6 +345,25 @@ export function PromptsColumn({
             totalChannels={totalChannels}
           />
         ))}
+      </div>
+
+      <div className="px-5 pb-5 pt-2 border-t border-[var(--line-2)] mt-auto">
+        <button
+          type="button"
+          onClick={() => void downloadReport()}
+          disabled={!canDownloadReport || downloading}
+          title={canDownloadReport ? 'Download Markdown report' : 'Available once your run finishes.'}
+          className="w-full py-2.5 rounded-xl border border-[var(--line)] bg-[var(--surface)] hover:border-[var(--accent)] hover:text-[var(--accent-ink)] text-[13px] font-medium text-[var(--ink-2)] transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-[var(--line)] disabled:hover:text-[var(--ink-2)]"
+        >
+          {downloading ? (
+            <>
+              <span className="w-3 h-3 rounded-full border border-[var(--accent)] border-t-transparent animate-spin"></span>
+              Preparing download…
+            </>
+          ) : (
+            <span>Download report</span>
+          )}
+        </button>
       </div>
     </section>
   );

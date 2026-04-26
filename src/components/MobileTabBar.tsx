@@ -11,7 +11,7 @@ export function MobileTabBar({ tab, setTab, sourcesCount, promptCount }: MobileT
   const items: { id: MobileTab; label: string; count: number | null }[] = [
     { id: 'sources', label: 'Sources', count: sourcesCount },
     { id: 'chat', label: 'Chat', count: null },
-    { id: 'prompts', label: 'Prompts', count: promptCount },
+    { id: 'prompts', label: 'Output', count: promptCount },
   ];
   return (
     <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-[var(--surface)]/85 backdrop-blur-md border-t border-[var(--line)] tabbar-safe">

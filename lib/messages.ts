@@ -64,6 +64,27 @@ export async function listMessagesForResearch(
 }
 
 /**
+ * Messages tied to a specific research run (Council bubbles + narration).
+ * Oldest-first. Ownership is enforced via the research id.
+ */
+export async function listMessagesForRun(
+  clerkUserId: string,
+  researchId: string,
+  runId: string,
+): Promise<MessageRow[]> {
+  await assertResearchOwner(clerkUserId, researchId);
+  const supabase = createServiceRoleSupabaseClient();
+  const { data, error } = await supabase
+    .from('messages')
+    .select('id, research_id, role, body, council_role, council_seat, run_id, created_at')
+    .eq('research_id', researchId)
+    .eq('run_id', runId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data as DbMessageRow[] | null)?.map(rowToMessage) ?? [];
+}
+
+/**
  * Bulk variant for the workspace bootstrap — pulls messages for every
  * research in one query so the initial paint is a single round-trip.
  *

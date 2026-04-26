@@ -73,7 +73,9 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
   const analyzingId = pendingSource?.id ?? null;
   // Run research needs at least one indexed source (a seed user line is
   // inserted server-side when the chat is still empty).
-  const canRunCouncil = sources.length > 0;
+  const canRunResearch = sources.length > 0;
+  // Run id used to download the Markdown report once a run completes.
+  const latestRunId = ws.activeResearch.latestRunId ?? null;
 
   // Reset transient UI state when switching research sessions.
   // `isTyping` is per-research inside `useWorkspace`, so it doesn't need
@@ -290,12 +292,10 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                 onRenameResearch={handleRenameActiveResearch}
                 renameOnMount={renameOnMount}
                 onRenameConsumed={clearPendingRename}
-                councilDepth={ws.activeResearch.councilDepth}
-                onCouncilDepthChange={ws.setCouncilDepth}
                 onRunResearch={runResearch}
                 onCancelResearch={cancelResearch}
                 runStatus={ws.activeResearch.runStatus}
-                canRunCouncil={canRunCouncil}
+                canRunResearch={canRunResearch}
               />
             </div>
             <div className="col-card overflow-hidden flex flex-col min-h-0">
@@ -315,6 +315,7 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                 onToast={showToast}
                 totalChannels={ws.activeResearch.latestTotalChannels ?? 0}
                 runStatus={ws.activeResearch.runStatus}
+                latestRunId={latestRunId}
               />
             </div>
           </div>
@@ -337,12 +338,10 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                   onRenameResearch={handleRenameActiveResearch}
                   renameOnMount={renameOnMount}
                   onRenameConsumed={clearPendingRename}
-                  councilDepth={ws.activeResearch.councilDepth}
-                  onCouncilDepthChange={ws.setCouncilDepth}
                   onRunResearch={runResearch}
                   onCancelResearch={cancelResearch}
                   runStatus={ws.activeResearch.runStatus}
-                  canRunCouncil={canRunCouncil}
+                  canRunResearch={canRunResearch}
                 />
               </div>
             )}
@@ -366,6 +365,7 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                   onToast={showToast}
                   totalChannels={ws.activeResearch.latestTotalChannels ?? 0}
                   runStatus={ws.activeResearch.runStatus}
+                  latestRunId={latestRunId}
                 />
               </div>
             )}

@@ -1,18 +1,25 @@
 import { useState } from 'react';
 
 /**
- * Run / Stop control for the Council pipeline. Extracted so Sources and
- * other surfaces can share the same states without duplicating branching.
+ * Run / Stop control for a research pipeline. The same component drives
+ * Sources (the primary CTA) and any other surface that wants to kick off
+ * or interrupt a run.
+ *
+ * Visual states:
+ *   - `disabled` → muted pill, can't click
+ *   - `pending` / `running` → spinner + "Working…", morphs to "Stop" on hover
+ *   - `failed` → "Retry research" outline pill
+ *   - `complete` / null → primary `primaryLabel` pill
  *
  * @param primaryLabel - Copy for the idle, non-failed state (e.g. column-specific CTA).
- * @param className - Extra classes for the button (e.g. w-full).
+ * @param className - Extra classes for the button (e.g. `w-full`).
  */
-export function CouncilRunButton({
+export function RunResearchButton({
   onClick,
   onCancel,
   status,
   disabled,
-  primaryLabel = 'Run research',
+  primaryLabel = 'Start research',
   className = '',
 }: {
   onClick: () => void;
@@ -35,7 +42,7 @@ export function CouncilRunButton({
         onMouseLeave={() => setHoverStop(false)}
         onFocus={() => setHoverStop(true)}
         onBlur={() => setHoverStop(false)}
-        title="Stop the current Council run"
+        title="Stop the current research run"
         aria-label="Stop research run"
         className={`rounded-full px-3.5 h-8 text-[12px] font-medium transition flex items-center gap-1.5
           ${
@@ -68,7 +75,7 @@ export function CouncilRunButton({
       title={
         disabled
           ? 'Add at least one indexed source first.'
-          : 'Generate a fresh prompt portfolio with the Council'
+          : 'Generate a fresh prompt portfolio from your sources'
       }
       className={`rounded-full px-3.5 h-8 text-[12px] font-medium transition flex items-center gap-1.5
         ${

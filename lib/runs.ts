@@ -209,6 +209,28 @@ export async function isRunCancelled(runId: string): Promise<boolean> {
 }
 
 /**
+ * Load a single run row after verifying the user owns its parent research.
+ * Used by the Markdown report download route.
+ */
+export async function getRunForOwner(
+  clerkUserId: string,
+  runId: string,
+): Promise<RunRow | null> {
+  const supabase = createServiceRoleSupabaseClient();
+  const { data, error } = await supabase
+    .from('runs')
+    .select(
+      'id, research_id, status, council_depth, prompts, total_channels, peec_skipped, started_at, finished_at',
+    )
+    .eq('id', runId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  await assertResearchOwner(clerkUserId, (data as DbRunRow).research_id);
+  return rowToRun(data as DbRunRow);
+}
+
+/**
  * Return the most recent run for a research, or null if none exists.
  *
  * Used by the orchestrator's idempotency guard (refuse to start a new

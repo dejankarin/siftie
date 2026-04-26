@@ -143,7 +143,7 @@ export function ChatColumn({
       <header className="px-5 pt-5 pb-3 border-b border-[var(--line-2)]">
         <div className="flex items-center gap-3">
           <div>
-            <h2 className="text-[15px] font-semibold tracking-tight text-[var(--ink)]">Council</h2>
+            <h2 className="text-[15px] font-semibold tracking-tight text-[var(--ink)]">Chat</h2>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="text-[11.5px] text-[var(--ink-3)]">Active · analyzing {sourcesCount} sources</span>
             </div>
