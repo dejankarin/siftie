@@ -27,7 +27,7 @@
  * What this is NOT:
  *   - It's not the Ideate stage. The Ideate stage (`lib/ideate.ts`)
  *     builds the prompt, calls *this* file with the OpenAI key, and
- *     falls back to Gemini Pro on failure. This file is just the
+ *     falls back to Gemini Flash on failure. This file is just the
  *     transport.
  */
 import 'server-only';

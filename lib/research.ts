@@ -12,7 +12,8 @@
  *      background (the API route calls it from `waitUntil`). It:
  *        a. Resolves the user's API keys + the research's sources +
  *           transcript.
- *        b. Calls Gemini Pro for ~24 candidate prompts (Ideate).
+ *        b. Calls OpenAI GPT-5.4 (with Gemini Flash as fallback)
+ *           for ~24 candidate prompts (Ideate).
  *        c. Optionally calls Peec to score each prompt's hit count.
  *           If the user has no Peec key, we mark `peecSkipped: true`
  *           and surface a chat bubble explaining why hits will read
@@ -106,7 +107,7 @@ export interface StartRunResult {
  *   - 'missing_openrouter_key' — OpenRouter key not configured
  * Callers (the API route) translate these into 4xx responses.
  *
- * Ideate uses **OpenAI GPT-5.4 as the primary** model with **Gemini Pro
+ * Ideate uses **OpenAI GPT-5.4 as the primary** model with **Gemini Flash
  * as the fallback**. Either key on its own is enough to start a run; we
  * only block when both are missing.
  */
@@ -360,7 +361,7 @@ export async function runResearchPipeline(
       // the user what happened so the model attribution makes sense
       // and they know to top up their OpenAI key/quota.
       await emitAgentMessage(clerkUserId, researchId, runId, {
-        body: `OpenAI GPT-5.4 was unavailable, so I used Gemini Pro as the fallback. ${ideate.fallbackReason}`,
+        body: `OpenAI GPT-5.4 was unavailable, so I used Gemini Flash as the fallback. ${ideate.fallbackReason}`,
       });
     }
 
@@ -769,7 +770,7 @@ function depthLabel(depth: CouncilDepth): string {
 }
 
 function ideateProviderLabel(provider: 'openai' | 'gemini'): string {
-  return provider === 'openai' ? 'OpenAI GPT-5.4' : 'Gemini Pro';
+  return provider === 'openai' ? 'OpenAI GPT-5.4' : 'Gemini Flash';
 }
 
 function countByCluster(prompts: IdeatePrompt[]): string {

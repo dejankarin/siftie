@@ -10,10 +10,11 @@
  *      reasoning per prompt. This is also the row shape persisted to
  *      `runs.prompts` JSONB.
  *
- *   2. **IdeatePrompt** — what Gemini Pro returns from the Ideate step.
- *      No `hits` / `councilNote` yet — those are filled later by
- *      Peec + Council. We keep this as a separate type to make the
- *      pipeline stages obvious in code (Ideate ⇒ Baseline ⇒ Council).
+ *   2. **IdeatePrompt** — what the Ideate stage (OpenAI GPT-5.4 primary,
+ *      Gemini Flash fallback) returns. No `hits` / `councilNote`
+ *      yet — those are filled later by Peec + Council. We keep this
+ *      as a separate type to make the pipeline stages obvious in
+ *      code (Ideate ⇒ Baseline ⇒ Council).
  *
  *   3. **CouncilDepth** — the closed set the user can pick in the
  *      composer dropdown and the column on `researches.council_depth` /

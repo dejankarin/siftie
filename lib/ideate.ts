@@ -13,18 +13,18 @@
  *
  * ## Two-provider strategy
  *
- * We try **OpenAI GPT-5.4 (primary)** first and **Gemini Pro
+ * We try **OpenAI GPT-5.4 (primary)** first and **Gemini Flash
  * (fallback)** second. Why this order:
  *
  *   1. OpenAI is the strongest general-purpose model on prompt-design
  *      tasks today; the user explicitly asked for it as the primary.
- *   2. Gemini Pro covers the failure mode where OpenAI is rate-
+ *   2. Gemini Flash covers the failure mode where OpenAI is rate-
  *      limited, the user's OpenAI key is missing/invalid, or OpenAI
  *      is having an outage. Both providers can answer the same JSON
  *      schema, so the fallback is fully transparent.
  *   3. The orchestrator returns metadata about which provider ran +
  *      why we fell back, so the chat bubble in `lib/research.ts` can
- *      tell the user "OpenAI was unavailable, so we used Gemini Pro".
+ *      tell the user "OpenAI was unavailable, so we used Gemini Flash".
  *
  * ## BYOK + PostHog
  *
@@ -48,16 +48,25 @@ import {
 import { withResilience } from './resilience';
 
 /**
- * Gemini Pro fallback model. We pin to the explicit
- * `gemini-3.1-pro-preview` ID per the Gemini 3 docs — `*-latest`
+ * Gemini Flash fallback model. We pin to the explicit
+ * `gemini-3-flash-preview` ID per the Gemini 3 docs — `*-latest`
  * aliases aren't documented for the 3-series and have caused
- * routing/quota oddities. Note: `gemini-3.1-pro-preview` has **no
- * free tier** in the Gemini API (paid only), so the fallback only
- * works on a paid Gemini key.
+ * routing/quota oddities in earlier dev runs. Same family as the
+ * source-ingestion + interview-question paths in `lib/ingest/*` and
+ * `lib/interview.ts`, so a single working Gemini key unlocks every
+ * Gemini-backed code path in the app.
  *
- * Docs: https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview
+ * Note: this is a deliberate downgrade from the earlier
+ * `gemini-3.1-pro-preview` lineup — Pro 3.1 was visibly slow
+ * (~30–45s) on a 24-prompt portfolio and required a paid Gemini
+ * tier, both of which made the fallback feel like a punishment.
+ * Flash 3 finishes inside ~10s on the happy path and works on the
+ * free tier, which keeps the fallback experience close to the
+ * primary's latency budget.
+ *
+ * Docs: https://ai.google.dev/gemini-api/docs/models/gemini-3-flash-preview
  */
-const GEMINI_MODEL = 'gemini-3.1-pro-preview';
+const GEMINI_MODEL = 'gemini-3-flash-preview';
 
 /** Generous timeout for the Gemini fallback path. */
 const GEMINI_TIMEOUT_MS = 90_000;
@@ -153,9 +162,9 @@ export class IdeateProviderError extends Error {
 
 /**
  * Generate the candidate prompts for a research run. Tries OpenAI
- * GPT-5.4 first; on any error, falls back to Gemini Pro (provided a
- * Gemini key is available). Returns the parsed + Zod-validated array
- * along with metadata about which provider answered.
+ * GPT-5.4 first; on any error, falls back to Gemini Flash (provided
+ * a Gemini key is available). Returns the parsed + Zod-validated
+ * array along with metadata about which provider answered.
  */
 export async function generateIdeatePrompts(
   keys: IdeateKeys,

@@ -28,7 +28,7 @@ Built and deployed in 48-hour sprints, tracked as nine "sessions". As of **commi
 
 Beyond the original plan, the following also shipped:
 
-- **OpenAI Platform direct** as the Ideate primary (GPT-5.4) with Gemini Pro fallback, plus an OpenAI fallback for source ingestion when Gemini Flash is unavailable. Independent of OpenRouter so users can use their existing OpenAI billing.
+- **OpenAI Platform direct** as the Ideate primary (GPT-5.4) with Gemini Flash fallback, plus an OpenAI fallback for source ingestion when Gemini Flash is unavailable. Independent of OpenRouter so users can use their existing OpenAI billing.
 - **3-model fast Council demo lineup** — the original plan called for a 4-seat all-frontier Council (`gpt-5.4` + `gemini-3.1-pro-preview` + `claude-opus-4.5` + `grok-4`) but the full deliberation took ~60–90s end-to-end, which made the live agent feel like a backend job instead of a real-time collaborator. Swapped to **`openai/gpt-5.4-mini`** + **`google/gemini-2.5-flash`** + **`anthropic/claude-haiku-4.5`** — one fast tier per major vendor, ~3–5x faster wall-clock, still proves the cross-vendor disagreement thesis. `REVIEWER_COUNT_BY_DEPTH` shifted from `{ quick: 3, standard: 4 }` to `{ quick: 2, standard: 3 }` to keep the depth lever; the OpenRouter per-call timeout dropped from 90s → 60s. The first seat (`gpt-5.4-mini`) doubles as the synthesis Chair, same family as the Ideate primary so the Chair runs the exact reasoning lineage that produced the candidate prompts. Easy to scale back up to 4 frontier reviewers later — it's a single edit to `COUNCIL_MODELS` in `lib/openrouter.ts` (the DB constraint already allows seats 1–4).
 - **Stoppable research runs (Session 6.5)** — soft cancellation via `runs.status='cancelling'` polled by the orchestrator between stages; the chat narrates the stop and the prompts column reflects it without a reload.
 - **Markdown report download (Session 6.6)** — `GET /api/research/[runId]/report` streams a comprehensive Markdown export (TL;DR via Gemini Flash, run metadata, sources table, prompt portfolio with per-prompt Chair rationales, full Council transcript) wired to the **Download report** button at the bottom of the prompts column.
@@ -120,7 +120,7 @@ Other scripts:
                                 refine_prompts → cluster ack
                                 rebaseline / run_research → waitUntil(startResearchRun)
                                 web_search     → waitUntil(searchWeb + summarise)
-  /api/research             → Ideate (GPT-5.4 → Gemini Pro fallback)
+  /api/research             → Ideate (GPT-5.4 → Gemini Flash fallback)
                               → [Peec baseline if key]
                               → Council (3 OpenRouter models, 3 stages, anonymised — demo lineup)
                               → Chair synthesis
@@ -172,7 +172,7 @@ lib/
   docx.ts                     mammoth wrapper (Word doc → text + html)
   flags.ts                    Typed PostHog feature flags + server-side accessor
   gemini.ts                   Gemini 3 Flash wrapper (PostHog-instrumented)
-  ideate.ts                   Ideate stage — OpenAI primary, Gemini Pro fallback
+  ideate.ts                   Ideate stage — OpenAI primary, Gemini Flash fallback
   ingest/                     ContextDoc Zod schema + dispatcher (pdf/url/doc/md)
   interview.ts                First-six interview questions via Gemini Flash
   keys.ts                     getUserApiKey(userId, provider) + listKeyStatus
