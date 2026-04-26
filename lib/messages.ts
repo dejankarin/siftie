@@ -27,7 +27,9 @@ export interface MessageRow {
   createdAt: number;
   /** Reserved for Session 6 council bubbles. `null` for ordinary chat. */
   councilRole: 'reviewer' | 'chair' | null;
-  /** Reserved for Session 6 council bubbles (1..4). `null` otherwise. */
+  /** Council bubbles store seat numbers in 1..N where N is the active
+   *  reviewer count (currently 1..3 for the demo lineup; the DB
+   *  constraint still allows up to 4 for backward compat). */
   councilSeat: number | null;
   /** Reserved for Session 6 — links to `runs.id` once research runs land. */
   runId: string | null;

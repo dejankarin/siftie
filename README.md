@@ -29,6 +29,7 @@ Built and deployed in 48-hour sprints, tracked as nine "sessions". As of **commi
 Beyond the original plan, the following also shipped:
 
 - **OpenAI Platform direct** as the Ideate primary (GPT-5.4) with Gemini Pro fallback, plus an OpenAI fallback for source ingestion when Gemini Flash is unavailable. Independent of OpenRouter so users can use their existing OpenAI billing.
+- **3-model fast Council demo lineup** — the original plan called for a 4-seat all-frontier Council (`gpt-5.4` + `gemini-3.1-pro-preview` + `claude-opus-4.5` + `grok-4`) but the full deliberation took ~60–90s end-to-end, which made the live agent feel like a backend job instead of a real-time collaborator. Swapped to **`openai/gpt-5.4-mini`** + **`google/gemini-2.5-flash`** + **`anthropic/claude-haiku-4.5`** — one fast tier per major vendor, ~3–5x faster wall-clock, still proves the cross-vendor disagreement thesis. `REVIEWER_COUNT_BY_DEPTH` shifted from `{ quick: 3, standard: 4 }` to `{ quick: 2, standard: 3 }` to keep the depth lever; the OpenRouter per-call timeout dropped from 90s → 60s. The first seat (`gpt-5.4-mini`) doubles as the synthesis Chair, same family as the Ideate primary so the Chair runs the exact reasoning lineage that produced the candidate prompts. Easy to scale back up to 4 frontier reviewers later — it's a single edit to `COUNCIL_MODELS` in `lib/openrouter.ts` (the DB constraint already allows seats 1–4).
 - **Stoppable research runs (Session 6.5)** — soft cancellation via `runs.status='cancelling'` polled by the orchestrator between stages; the chat narrates the stop and the prompts column reflects it without a reload.
 - **Markdown report download (Session 6.6)** — `GET /api/research/[runId]/report` streams a comprehensive Markdown export (TL;DR via Gemini Flash, run metadata, sources table, prompt portfolio with per-prompt Chair rationales, full Council transcript) wired to the **Download report** button at the bottom of the prompts column.
 - **Deep-link routing** — `/app/[projectId]/[researchId]` server route validates ownership in one query and falls back to `redirect('/app')` on mismatch (no information leak). The client keeps URL ⇄ active-pair in sync bidirectionally so the browser back button walks recent research switches naturally.
@@ -81,8 +82,8 @@ Other scripts:
 | Interview questions | `gemini-3-flash-preview` | Gemini API | First six gap-attributed questions per research. |
 | **Ideate (primary)** | **`gpt-5.4`** | **OpenAI Platform** | ~24 candidate prompts, structured output via `response_format: json_schema`, reasoning model with `reasoning_effort: 'low'`. |
 | Ideate (fallback) | `gemini-3.1-pro-preview` | Gemini API | `ThinkingLevel.MEDIUM`. Paid tier only (no free tier on Pro 3.1). |
-| Council reviewers | `openai/gpt-5.4`, `google/gemini-3.1-pro-preview`, `anthropic/claude-opus-4.5`, `x-ai/grok-4` | OpenRouter | Anonymised seats 1–4. Every run uses Standard depth (all 4 reviewers); no user-facing depth selector. |
-| Council Chair | `google/gemini-3.1-pro-preview` | OpenRouter | Synthesises the final picks with per-prompt `councilNote`. |
+| Council reviewers | `openai/gpt-5.4-mini`, `google/gemini-2.5-flash`, `anthropic/claude-haiku-4.5` | OpenRouter | Demo lineup: 3 fast models, one per major vendor — chosen so the live agent feels snappy (~3–5x faster end-to-end vs. an all-frontier lineup) while still proving cross-vendor disagreement. Anonymised seats 1–3. Every run uses Standard depth (all 3 reviewers); no user-facing depth selector. |
+| Council Chair | `openai/gpt-5.4-mini` | OpenRouter | First seat doubles as the synthesis Chair (same family as the Ideate primary), with per-prompt `councilNote`. |
 
 **Web layer:** Tavily (`@tavily/core`) — `extract` for URL ingestion, `search` reserved for the Session 8 reply router action.
 
@@ -121,7 +122,7 @@ Other scripts:
                                 web_search     → waitUntil(searchWeb + summarise)
   /api/research             → Ideate (GPT-5.4 → Gemini Pro fallback)
                               → [Peec baseline if key]
-                              → Council (4 OpenRouter models, 3 stages, anonymised)
+                              → Council (3 OpenRouter models, 3 stages, anonymised — demo lineup)
                               → Chair synthesis
                               → runs row + chat bubbles via Realtime
   /api/research/cancel      → flip status='cancelling'; orchestrator polls between stages
@@ -238,7 +239,7 @@ Schema overview (all RLS-scoped on Clerk user id):
 - `user_profiles` — one row per Clerk user; carries `posthog_capture_llm` (default `true`).
 - `user_api_keys` — encrypted BYOK keys per `(clerk_user_id, provider)`. Providers: `openai`, `gemini`, `openrouter`, `tavily`, `peec`.
 - `projects` → `researches` → `sources` / `messages` / `runs`.
-- `messages.council_role` (`reviewer | chair`) + `messages.council_seat` (1–4) replay anonymised Council bubbles on refresh.
+- `messages.council_role` (`reviewer | chair`) + `messages.council_seat` (1–3 in the demo lineup; DB allows 1–4) replay anonymised Council bubbles on refresh.
 - `runs` — one per research run; stores `prompts` JSONB, `channels` JSONB (Peec model channels surfaced for this run, used by the dynamic HitsBar tooltips), `total_channels`, `peec_skipped`, `council_depth`, `status`.
 - Realtime publication: `sources`, `messages`, `runs`.
 

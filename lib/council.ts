@@ -14,10 +14,10 @@
  *
  * Anonymisation: we never tell the reviewers which model they are
  * (Anthropic / Google / etc.) and we never tell them who else is on
- * the council. Each just sees "Reviewer A/B/C/D" labels. This avoids
+ * the council. Each just sees "Reviewer A/B/C" labels. This avoids
  * a model deferring to "the OpenAI reviewer" or refusing to disagree
  * with "the Google one". The seat number that ends up on the chat
- * bubble (`council_seat: 1..4`) is purely UI scaffolding, not a hint
+ * bubble (`council_seat: 1..3`) is purely UI scaffolding, not a hint
  * fed back into the prompt.
  *
  * Streaming: this module emits messages to the chat in real time via
@@ -27,9 +27,10 @@
  *
  * Failure mode: a single reviewer failure (timeout, JSON garbage,
  * 5xx) does NOT fail the run. We log the failure as a chat bubble
- * ("Reviewer C timed out — proceeding with 3 verdicts") and fold the
- * remaining reviewers' picks into the Chair stage. Council with 3 of 4
- * reviewers is still vastly better than no council at all.
+ * ("Reviewer C timed out — proceeding with 2 verdicts") and fold the
+ * remaining reviewers' picks into the Chair stage. Council with 2 of 3
+ * reviewers is still vastly better than no council at all. Only the
+ * Chair stage is non-recoverable.
  */
 import 'server-only';
 import {
@@ -45,13 +46,18 @@ import {
 import { COUNCIL_MODELS, generateJson, type CouncilModelId } from './openrouter';
 
 /**
- * `quick` runs the Council with just 3 reviewers (skip the 4th seat).
- * `standard` runs all 4. Both depths run all 3 stages — depth controls
+ * `quick` runs the Council with just 2 reviewers (skip the 3rd seat).
+ * `standard` runs all 3. Both depths run all 3 stages — depth controls
  * breadth of opinion, not depth of deliberation.
+ *
+ * Note: this used to be 3-vs-4 when the lineup had four reasoning-
+ * model seats. We dropped to a 3-model fast demo lineup (see
+ * `COUNCIL_MODELS` in `lib/openrouter.ts`) so the depth ratio
+ * shifted with it. Keep these in sync if the lineup changes again.
  */
 export const REVIEWER_COUNT_BY_DEPTH: Record<CouncilDepth, number> = {
-  quick: 3,
-  standard: 4,
+  quick: 2,
+  standard: 3,
 };
 
 export interface CouncilContext {
@@ -103,7 +109,7 @@ export interface CouncilResult {
    * IdeatePrompt array (using `index`) + Peec hit counts.
    */
   picks: CouncilChairPick[];
-  /** How many reviewers actually returned valid output (1..4). */
+  /** How many reviewers actually returned valid output (1..3). */
   reviewersUsed: number;
 }
 
@@ -211,9 +217,11 @@ export async function runCouncil(
   if (ctx.checkCancelled) await ctx.checkCancelled();
 
   // Pick the Chair model: prefer the strongest reasoning model
-  // available. We use the first model in COUNCIL_MODELS (gpt-5.4) by
-  // convention. This is OK to leak in the system prompt — there is no
-  // peer above the Chair to defer to.
+  // available. We use the first model in COUNCIL_MODELS (gpt-5.4-mini
+  // in the demo lineup) by convention — same family as the Ideate
+  // primary, so the Chair runs the exact reasoning lineage that
+  // produced the candidate prompts. This is OK to leak in the system
+  // prompt — there is no peer above the Chair to defer to.
   const chairModel = COUNCIL_MODELS[0];
 
   let chairResponse: CouncilChairResponse;

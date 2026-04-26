@@ -9,7 +9,8 @@
  *      and structured-output handling "for free" — and, critically, we
  *      can wrap the client with `@posthog/ai`'s `OpenAI` so every call
  *      emits a `$ai_generation` event with proper `$ai_provider`
- *      attribution per model.
+ *      attribution per model. This is what makes a 3-vendor Council
+ *      cheap to wire — one wrapper, three providers, one trace.
  *
  *   2. **Bring-Your-Own-Key.** Caller passes the user's OpenRouter key
  *      explicitly — we never read `process.env`. Mirrors `lib/gemini.ts`.
@@ -25,8 +26,8 @@
  *
  * What this is NOT:
  *   - It's not the Council. The Council (lib/council.ts) builds prompts,
- *     coordinates the four reviewers, and merges their verdicts. This
- *     file is just the transport.
+ *     coordinates the reviewers, and merges their verdicts. This file
+ *     is just the transport.
  */
 import 'server-only';
 import { OpenAI as PostHogOpenAI } from '@posthog/ai/openai';
@@ -34,43 +35,60 @@ import { getPostHogServer } from './posthog';
 import { withResilience } from './resilience';
 
 /**
- * The four model IDs we hit through OpenRouter. Pinned here so the
- * Council file can `import { COUNCIL_MODELS } from './openrouter'` and
- * we have one source of truth. If a model id 404s on OpenRouter we
+ * The model IDs we hit through OpenRouter for the Council. Pinned here
+ * so the Council file can `import { COUNCIL_MODELS } from './openrouter'`
+ * and we have one source of truth. If a model id 404s on OpenRouter we
  * change it here and every reviewer picks it up.
  *
- * Order matters: the first 3 are the "quick" depth, all 4 are
+ * **Demo lineup (3 fast models, one per major vendor).** Earlier drafts
+ * of the plan used a 4-seat lineup with the strongest reasoning model
+ * from each vendor (gpt-5.4 / gemini-3.1-pro / claude-opus-4.5 / grok-4),
+ * but the full deliberation was so slow (~60–90s end-to-end) that the
+ * Council read like a backend job rather than a live agent. For the
+ * demo we trade a little reasoning depth for ~3–5x faster wall-clock
+ * by routing every seat to a "flash"-tier sibling of the original
+ * model. Three vendors is enough to prove the cross-model disagreement
+ * thesis; we can scale back up to 4 strong reviewers later.
+ *
+ * Order matters: the first 2 are the "quick" depth, all 3 are
  * "standard" depth. See `lib/council.ts` for selection.
  */
 export const COUNCIL_MODELS = [
-  // gpt-5.4 over gpt-5.5: 5.4 is the current stable frontier reasoning
-  // model; we picked it for Ideate too so the Council Chair runs the
-  // exact model the user has paid quota for.
-  // https://developers.openai.com/api/docs/models/gpt-5.4
-  'openai/gpt-5.4',
-  // Pinned to `gemini-3.1-pro-preview` per Google's current canonical
-  // naming for the Pro tier. OpenRouter exposes this exact ID.
-  // https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview
-  // https://openrouter.ai/google/gemini-3.1-pro-preview
-  'google/gemini-3.1-pro-preview',
-  'anthropic/claude-opus-4.5',
-  'x-ai/grok-4',
+  // OpenAI's GPT-5.4 mini — same family as the Ideate primary, so the
+  // Chair runs the exact reasoning lineage the candidate prompts were
+  // generated under, just at a fraction of the latency.
+  // https://developers.openai.com/api/docs/models/gpt-5.4-mini
+  'openai/gpt-5.4-mini',
+  // Gemini 2.5 Flash — Google's mainline fast tier with a generous
+  // context window. We deliberately do NOT use a Gemini 3.x model
+  // here: the 3-series flagship reasoning models loop on low temps
+  // through OpenRouter (see `isReasoningModel` below) and Flash 2.5
+  // hits the speed/quality balance we want for the demo.
+  // https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash
+  'google/gemini-2.5-flash',
+  // Anthropic's Claude Haiku 4.5 — the smallest 4.x sibling of
+  // Opus 4.5. Different vendor + different lineage from the other
+  // two seats, which is the whole point of the council.
+  'anthropic/claude-haiku-4.5',
 ] as const;
 export type CouncilModelId = (typeof COUNCIL_MODELS)[number];
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 /**
- * Hard timeout per call. Council reviewers crunch a lot of context
- * (sources + interview + ~24 prompts) and reasoning models like
- * gpt-5.4 / grok-4 are slow, so we budget generously.
+ * Hard timeout per call. The demo lineup is intentionally fast — gpt-5.4-
+ * mini, gemini-2.5-flash and claude-haiku-4.5 all comfortably finish a
+ * Council reviewer call in well under 30s — but reasoning effort, retry
+ * jitter, and OpenRouter's own queueing can spike, so we keep a 60s
+ * ceiling. If we ever swap back to opus / pro / grok-4 reviewers, bump
+ * this back to 90s.
  */
-const TIMEOUT_MS = 90_000;
+const TIMEOUT_MS = 60_000;
 
 export interface OpenRouterCallOptions {
   /** Clerk user id — becomes the PostHog distinctId on the $ai_generation event. */
   posthogDistinctId: string;
-  /** Run-level trace id so all 7 council calls (4 reviewers + 3 cross + 1 chair) appear in one trace. */
+  /** Run-level trace id so all 7 council calls (3 reviewers + 3 cross + 1 chair) appear in one trace. */
   posthogTraceId: string;
   /** Mirrors the user's `posthog_capture_llm` toggle. */
   posthogPrivacyMode: boolean;
@@ -79,7 +97,7 @@ export interface OpenRouterCallOptions {
 }
 
 export interface JsonGenerationParams {
-  /** OpenRouter model id, e.g. "openai/gpt-5.4". */
+  /** OpenRouter model id, e.g. "openai/gpt-5.4-mini". */
   model: string;
   /** System message that frames the role + rules. */
   system: string;

@@ -765,7 +765,7 @@ async function emitAgentMessage(
 }
 
 function depthLabel(depth: CouncilDepth): string {
-  return depth === 'quick' ? 'quick · 3 reviewers' : 'standard · 4 reviewers';
+  return depth === 'quick' ? 'quick · 2 reviewers' : 'standard · 3 reviewers';
 }
 
 function ideateProviderLabel(provider: 'openai' | 'gemini'): string {

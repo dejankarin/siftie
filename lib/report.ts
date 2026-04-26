@@ -36,7 +36,7 @@ const TldrJsonSchema = {
 } as const;
 
 const MODELS_LINE =
-  'Ideate: OpenAI GPT-5.4 (primary) + Google Gemini 3 (fallback) · Council: OpenRouter — GPT-5.4 reviewers + Gemini 3.1 Pro Chair';
+  'Ideate: OpenAI GPT-5.4 (primary) + Google Gemini 3 (fallback) · Council: OpenRouter — gpt-5.4-mini · gemini-2.5-flash · claude-haiku-4.5 (Chair: gpt-5.4-mini)';
 
 export interface BuildMarkdownReportResult {
   markdown: string;
