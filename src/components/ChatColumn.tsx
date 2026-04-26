@@ -108,6 +108,11 @@ export interface ChatColumnProps {
    * already pending/running so the user can't double-fire.
    */
   onRunResearch: () => void;
+  /**
+   * Cancel the in-flight run. Only invoked when `runStatus` is
+   * `pending` or `running`; the button hides itself otherwise.
+   */
+  onCancelResearch: () => void;
   runStatus: 'pending' | 'running' | 'complete' | 'failed' | null | undefined;
   /** Disable Run if the user hasn't sent any messages or added sources yet. */
   canRun: boolean;
@@ -124,6 +129,7 @@ export function ChatColumn({
   councilDepth,
   onCouncilDepthChange,
   onRunResearch,
+  onCancelResearch,
   runStatus,
   canRun,
 }: ChatColumnProps) {
@@ -242,6 +248,7 @@ export function ChatColumn({
           </label>
           <RunResearchButton
             onClick={onRunResearch}
+            onCancel={onCancelResearch}
             status={runStatus}
             disabled={!canRun}
           />
@@ -253,52 +260,97 @@ export function ChatColumn({
 }
 
 /**
- * The Run research button is its own component because it has 4 visual
- * states (idle, pending/running, failed, disabled) and inlining the
- * branching logic would make the composer hard to read.
+ * The Run / Stop button is its own component because it has 4 visual
+ * states and inlining the branching logic would make the composer
+ * hard to read:
  *
  *   - `disabled` (no sources or no chat messages) → muted + tooltip
- *   - `pending` / `running` → spinner + "Working…" disabled
- *   - `failed` → red "Retry" pill (still clickable)
- *   - `complete` / null → primary "Run research" pill
+ *   - `pending` / `running` → spinner + "Working…" by default; on hover
+ *     it morphs into a clickable "Stop" button that calls `onCancel`.
+ *     Same pattern as ChatGPT/Cursor — gives the user an out from a
+ *     run that's taking too long without surrendering visual real
+ *     estate to a permanent second button.
+ *   - `failed` → "Retry research" pill (still clickable, hits onClick)
+ *   - `complete` / null → primary "Run research" pill (hits onClick)
+ *
+ * Cancellation note: clicking Stop posts to /api/research/cancel which
+ * flips the runs row to `failed`. The orchestrator polls that row
+ * between stages and bails out, but any LLM call already in flight
+ * still completes in the background — that's a hard trade-off of
+ * `waitUntil` on serverless. The UI flips to "Run research" instantly
+ * via the optimistic local state in `useWorkspace.cancelResearch`.
  */
 function RunResearchButton({
   onClick,
+  onCancel,
   status,
   disabled,
 }: {
   onClick: () => void;
+  onCancel: () => void;
   status: 'pending' | 'running' | 'complete' | 'failed' | null | undefined;
   disabled: boolean;
 }) {
   const busy = status === 'pending' || status === 'running';
   const failed = status === 'failed';
-  const label = busy ? 'Working…' : failed ? 'Retry research' : 'Run research';
-  const isDisabled = disabled || busy;
+  const [hoverStop, setHoverStop] = useState(false);
+
+  if (busy) {
+    return (
+      <button
+        type="button"
+        onClick={onCancel}
+        onMouseEnter={() => setHoverStop(true)}
+        onMouseLeave={() => setHoverStop(false)}
+        onFocus={() => setHoverStop(true)}
+        onBlur={() => setHoverStop(false)}
+        title="Stop the current Council run"
+        aria-label="Stop research run"
+        className={`rounded-full px-3.5 h-8 text-[12px] font-medium transition flex items-center gap-1.5
+          ${
+            hoverStop
+              ? 'border border-[var(--line)] bg-[var(--surface)] text-[var(--ink)] hover:border-[var(--accent)] cursor-pointer'
+              : 'bg-[var(--btn-disabled-bg)] text-[var(--btn-disabled-fg)] cursor-pointer'
+          }`}
+      >
+        {hoverStop ? (
+          <>
+            <span
+              aria-hidden="true"
+              className="w-2.5 h-2.5 rounded-[2px] bg-current"
+            ></span>
+            Stop
+          </>
+        ) : (
+          <>
+            <span className="w-3 h-3 rounded-full border border-current border-t-transparent animate-spin"></span>
+            Working…
+          </>
+        )}
+      </button>
+    );
+  }
+
+  const label = failed ? 'Retry research' : 'Run research';
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={isDisabled}
+      disabled={disabled}
       title={
         disabled
           ? 'Add at least one source and send a chat message first.'
-          : busy
-            ? 'A run is already in flight'
-            : 'Generate a fresh prompt portfolio with the Council'
+          : 'Generate a fresh prompt portfolio with the Council'
       }
       className={`rounded-full px-3.5 h-8 text-[12px] font-medium transition flex items-center gap-1.5
         ${
-          isDisabled
+          disabled
             ? 'bg-[var(--btn-disabled-bg)] text-[var(--btn-disabled-fg)] cursor-not-allowed'
             : failed
               ? 'border border-[var(--line)] bg-[var(--surface)] text-[var(--ink)] hover:border-[var(--accent)]'
               : 'bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] hover:bg-[var(--btn-primary-hover)]'
         }`}
     >
-      {busy && (
-        <span className="w-3 h-3 rounded-full border border-current border-t-transparent animate-spin"></span>
-      )}
       {label}
     </button>
   );

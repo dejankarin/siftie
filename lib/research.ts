@@ -65,6 +65,7 @@ import {
   createRun,
   failRun,
   getLatestRunByResearch,
+  isRunCancelled,
 } from './runs';
 import { listSourcesForResearch } from './sources';
 import { listMessagesForResearch } from './messages';
@@ -237,6 +238,8 @@ export async function runResearchPipeline(
       body: `Working on it. I'll generate candidate prompts, vet them with the Council (${depthLabel(effectiveCouncilDepth)}), then surface the strongest portfolio.`,
     });
 
+    await throwIfCancelled(runId);
+
     // -----------------------------------------------------------------
     // Stage 1 — Ideate (OpenAI primary, Gemini fallback)
     // -----------------------------------------------------------------
@@ -322,6 +325,12 @@ export async function runResearchPipeline(
       fallback: ideate.fallbackReason ? true : false,
     });
 
+    // Cancellation check *before* the post-Ideate narration. Without
+    // this, a Stop hit during the Ideate HTTP call would still leave a
+    // stale "Drafted N candidate prompts" bubble landing after the
+    // "Run cancelled." bubble.
+    await throwIfCancelled(runId);
+
     const candidates = ideate.prompts;
     if (candidates.length === 0) {
       await emitAgentMessage(clerkUserId, researchId, runId, {
@@ -385,9 +394,15 @@ export async function runResearchPipeline(
       });
     }
 
+    await throwIfCancelled(runId);
+
     // -----------------------------------------------------------------
     // Stage 3 — Council
     // -----------------------------------------------------------------
+    // The Council emits chat messages AND polls for cancellation
+    // between reviewers. The poll is wired through CouncilContext below
+    // (see `checkCancelled`) so we don't have to thread `runId` deep
+    // into council.ts.
     const councilEmit: CouncilEmit = async ({ body, councilRole, councilSeat }) => {
       await createMessage(clerkUserId, {
         researchId,
@@ -415,9 +430,12 @@ export async function runResearchPipeline(
           traceId,
           privacyMode,
         },
+        checkCancelled: () => throwIfCancelled(runId),
       },
       councilEmit,
     );
+
+    await throwIfCancelled(runId);
 
     // -----------------------------------------------------------------
     // Stage 4 — Surface (persist + announce)
@@ -463,6 +481,19 @@ export async function runResearchPipeline(
       },
     });
   } catch (err) {
+    if (err instanceof RunCancelledError) {
+      // User-initiated cancel. The runs row is already `failed` (set
+      // by /api/research/cancel) and the cancel route emitted the
+      // "Run cancelled." chat bubble. We deliberately do NOT call
+      // failRun, do NOT log this as `research.run.failed`, and do NOT
+      // capture `research_run_failed` in PostHog — those events are
+      // for genuine pipeline failures, not user actions.
+      log.info('research.run.cancelled', {
+        run_id: runId,
+        research_id: researchId,
+      });
+      return;
+    }
     // Mark the run failed and capture a telemetry event. We've already
     // emitted a chat bubble inside the throwing branch; failing here
     // only persists the run state so the prompts column doesn't show
@@ -723,6 +754,31 @@ function researchError(code: string, message: string): Error {
   const err = new Error(message);
   (err as Error & { cause: string }).cause = code;
   return err;
+}
+
+/**
+ * Thrown at any orchestrator stage boundary if the user has hit Stop
+ * via /api/research/cancel (which flipped the runs row to `failed`).
+ * The top-level catch block recognises this and short-circuits the
+ * normal failure path: no extra "we crashed" bubble, no `failRun`
+ * (the row is already `failed`), no PostHog `research_run_failed`.
+ */
+export class RunCancelledError extends Error {
+  constructor() {
+    super('Run cancelled by user');
+    this.name = 'RunCancelledError';
+  }
+}
+
+/**
+ * Stage-boundary checkpoint. Cheap single-row select against `runs`;
+ * throws if the user cancelled. Call between major orchestrator
+ * stages (Ideate / Peec / each Council stage / Surface) and around
+ * each Council reviewer so cancellation latency stays in the seconds,
+ * not minutes.
+ */
+async function throwIfCancelled(runId: string): Promise<void> {
+  if (await isRunCancelled(runId)) throw new RunCancelledError();
 }
 
 function cryptoRandom(): string {

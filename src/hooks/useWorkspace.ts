@@ -185,6 +185,13 @@ export interface UseWorkspaceResult {
    */
   runResearch: () => Promise<void>;
   /**
+   * Cancel the in-flight research run for the active research.
+   * Optimistically flips the local `runStatus` so the spinner stops
+   * immediately even before Realtime echoes the row update. Resolves
+   * silently if there is no run in flight.
+   */
+  cancelResearch: () => Promise<void>;
+  /**
    * True while the active research has an agent reply in flight. Drives
    * the typing-bubble in `<ChatColumn />`.
    */
@@ -1362,6 +1369,51 @@ export function useWorkspace(): UseWorkspaceResult | null {
     }
   }, []);
 
+  /**
+   * Stop an in-flight research run. POSTs to /api/research/cancel
+   * which flips the runs row to `failed`; the existing Realtime
+   * subscription on `runs` will then echo the status change and
+   * refresh the local state. We *also* optimistically flip the local
+   * `runStatus` to `failed` so the spinner stops the instant the
+   * user clicks Stop, even if the Realtime round-trip takes a beat.
+   *
+   * No-op when there's no in-flight run (no `latestRunId` or status
+   * isn't pending/running) — we don't want a stale Stop to overwrite
+   * the row of a run that has since completed.
+   */
+  const cancelResearch = useCallback(async (): Promise<void> => {
+    const targetId = stateRef.current?.activeResearchId;
+    if (!targetId) return;
+    const research = stateRef.current?.researches.find((r) => r.id === targetId);
+    const runId = research?.latestRunId;
+    if (!runId) return;
+    if (research?.runStatus !== 'pending' && research?.runStatus !== 'running') return;
+
+    setState((s) =>
+      s
+        ? {
+            ...s,
+            researches: s.researches.map((r) =>
+              r.id === targetId ? { ...r, runStatus: 'failed' } : r,
+            ),
+          }
+        : s,
+    );
+    try {
+      await fetch('/api/research/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runId }),
+      });
+    } catch (err) {
+      // Cancellation is best-effort. The optimistic local flip already
+      // gave the user instant feedback; if the request failed (offline,
+      // etc.) the Realtime subscription will eventually re-sync the
+      // row's true state.
+      console.error('[useWorkspace] cancelResearch failed:', err);
+    }
+  }, []);
+
   if (!state || !activeProject || !activeResearch) {
     return null;
   }
@@ -1387,6 +1439,7 @@ export function useWorkspace(): UseWorkspaceResult | null {
     sendMessage,
     setCouncilDepth,
     runResearch,
+    cancelResearch,
     isTyping: pendingMessageResearchIds.has(state.activeResearchId),
   };
 }

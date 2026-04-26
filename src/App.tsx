@@ -185,6 +185,16 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
     [ws, showToast],
   );
 
+  const cancelResearch = useCallback(async () => {
+    try {
+      await ws.cancelResearch();
+      showToast('Stopping run…');
+    } catch {
+      // useWorkspace.cancelResearch already swallows fetch failures
+      // and logs them — it never throws — but keep the catch defensive.
+    }
+  }, [ws, showToast]);
+
   const runResearch = useCallback(async () => {
     showToast('Starting research…');
     try {
@@ -320,6 +330,7 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                 councilDepth={ws.activeResearch.councilDepth}
                 onCouncilDepthChange={ws.setCouncilDepth}
                 onRunResearch={runResearch}
+                onCancelResearch={cancelResearch}
                 runStatus={ws.activeResearch.runStatus}
                 canRun={canRunResearch}
               />
@@ -371,6 +382,7 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                   councilDepth={ws.activeResearch.councilDepth}
                   onCouncilDepthChange={ws.setCouncilDepth}
                   onRunResearch={runResearch}
+                  onCancelResearch={cancelResearch}
                   runStatus={ws.activeResearch.runStatus}
                   canRun={canRunResearch}
                 />

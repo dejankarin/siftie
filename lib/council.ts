@@ -74,6 +74,14 @@ export interface CouncilContext {
     traceId: string;
     privacyMode: boolean;
   };
+  /**
+   * Optional cancellation poll. The orchestrator wires this to a
+   * single-row select against `runs` so the Council short-circuits
+   * if the user has hit Stop. Called between stages, not in the hot
+   * path of a single reviewer call. Throws `RunCancelledError` (or
+   * any error — we just bubble it) when cancelled.
+   */
+  checkCancelled?: () => Promise<void>;
 }
 
 /**
@@ -145,6 +153,8 @@ export async function runCouncil(
     priorVerdictsBlock: '',
   });
 
+  if (ctx.checkCancelled) await ctx.checkCancelled();
+
   const stage1Reviews = await runReviewersInParallel({
     seats,
     stage: 1,
@@ -166,6 +176,8 @@ export async function runCouncil(
     (r): r is { seat: number; model: CouncilModelId; review: CouncilReviewerResponseT } =>
       r.review !== null,
   );
+
+  if (ctx.checkCancelled) await ctx.checkCancelled();
 
   const stage2Reviews = await runStage2(seats, validStage1, prompts.length, numberedPrompts, ctx, emit);
 
@@ -195,6 +207,8 @@ export async function runCouncil(
     promptsBlock: numberedPrompts,
     reviewerDigest,
   });
+
+  if (ctx.checkCancelled) await ctx.checkCancelled();
 
   // Pick the Chair model: prefer the strongest reasoning model
   // available. We use the first model in COUNCIL_MODELS (gpt-5.4) by

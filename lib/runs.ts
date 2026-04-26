@@ -127,6 +127,88 @@ export async function failRun(runId: string): Promise<void> {
 }
 
 /**
+ * User-initiated cancellation.
+ *
+ * The orchestrator runs inside `waitUntil` on a serverless lambda so we
+ * can't kill the process from outside; instead we mark the run as
+ * `failed` immediately (which flips the UI out of "Working…" via the
+ * existing Realtime subscription) and rely on the orchestrator's
+ * cancellation checkpoints (`isRunCancelled`) to bail out at the next
+ * stage boundary. In-flight LLM calls still complete in the background
+ * — that's just how `waitUntil` works — but no new stages run.
+ *
+ * Idempotent: cancelling a run that's already `complete`/`failed` is a
+ * no-op. Returns whether we actually flipped the row (so the API route
+ * can decide whether to emit the "Run cancelled." chat bubble).
+ *
+ * Verifies ownership via the research → project chain because
+ * service-role bypasses RLS.
+ */
+export async function cancelRun(
+  clerkUserId: string,
+  runId: string,
+): Promise<{ cancelled: boolean; researchId: string }> {
+  const supabase = createServiceRoleSupabaseClient();
+  // Read the run row (status + research_id). We then verify ownership
+  // by walking research → project, reusing the same helper as the rest
+  // of this file.
+  const { data: existing, error: readErr } = await supabase
+    .from('runs')
+    .select('id, research_id, status')
+    .eq('id', runId)
+    .maybeSingle();
+  if (readErr) throw readErr;
+  if (!existing) throw new ForbiddenError('Run not found or not owned by this user');
+
+  await assertResearchOwner(clerkUserId, existing.research_id);
+
+  if (existing.status !== 'running' && existing.status !== 'pending') {
+    return { cancelled: false, researchId: existing.research_id };
+  }
+
+  const { error } = await supabase
+    .from('runs')
+    .update({
+      status: 'failed',
+      finished_at: new Date().toISOString(),
+    })
+    .eq('id', runId)
+    // Guard against the orchestrator finishing between the read and the
+    // write — only flip if it's still running/pending.
+    .in('status', ['running', 'pending']);
+  if (error) throw error;
+  return { cancelled: true, researchId: existing.research_id };
+}
+
+/**
+ * Cheap polling helper used by the orchestrator at stage boundaries.
+ *
+ * Returns true if the run row has been flipped to a terminal state by
+ * `cancelRun` (or any other path). The orchestrator throws an
+ * `AbortError` when this returns true so the remaining stages are
+ * skipped.
+ *
+ * Implemented as a single-row select so it's cheap to call between
+ * every reviewer in the Council without hammering Postgres.
+ */
+export async function isRunCancelled(runId: string): Promise<boolean> {
+  const supabase = createServiceRoleSupabaseClient();
+  const { data, error } = await supabase
+    .from('runs')
+    .select('status')
+    .eq('id', runId)
+    .maybeSingle();
+  if (error) {
+    // Fail open: if we can't read the row, don't block the run. The
+    // orchestrator's existing error handling will surface real DB
+    // failures elsewhere.
+    return false;
+  }
+  if (!data) return false;
+  return data.status === 'failed' || data.status === 'complete';
+}
+
+/**
  * Return the most recent run for a research, or null if none exists.
  *
  * Used by the orchestrator's idempotency guard (refuse to start a new
