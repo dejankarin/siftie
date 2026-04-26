@@ -93,6 +93,16 @@ export interface Project {
   createdAt: number;
 }
 
+/**
+ * Compact mirror of `lib/runs.ts#RunChannel`. Lives in this file so the
+ * client can ship a typed prop without importing from `lib/` (which is
+ * server-only).
+ */
+export interface RunChannel {
+  id: string;
+  description: string;
+}
+
 export interface Research {
   id: string;
   projectId: string;
@@ -116,6 +126,18 @@ export interface Research {
   latestRunId?: string | null;
   /** Total Peec channels for the latest run; used by HitsBar fallbacks. */
   latestTotalChannels?: number;
+  /**
+   * Active Peec channels for the latest run, in Peec's order. Drives
+   * the per-cell tooltip on the HitsBar. Empty when Peec was skipped
+   * or the run pre-dates Session 7.
+   */
+  latestChannels?: RunChannel[];
+  /**
+   * Whether the latest completed run skipped Peec scoring (no key,
+   * empty project, etc.). Drives the dismissible "Add a Peec key"
+   * banner above the prompts list.
+   */
+  latestPeecSkipped?: boolean;
 }
 
 export interface WorkspaceState {

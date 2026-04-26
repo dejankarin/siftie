@@ -232,6 +232,22 @@
   .anim-slide-up {
     animation: slideUp 0.25s ease-out;
   }
+  /*
+   * Soft fade for popovers (Generate cluster) and drawer backdrops
+   * (Show all). Kept short so dismiss-then-reopen feels snappy rather
+   * than soggy.
+   */
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  .anim-fade-in {
+    animation: fadeIn 0.18s ease-out;
+  }
   @keyframes toastIn {
     from {
       opacity: 0;

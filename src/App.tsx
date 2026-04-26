@@ -404,11 +404,16 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
             <div className="col-card overflow-hidden flex flex-col min-h-0">
               <PromptsColumn
                 key={ws.activeResearch.id}
+                researchId={ws.activeResearch.id}
                 prompts={prompts}
                 onToast={showToast}
                 totalChannels={ws.activeResearch.latestTotalChannels ?? 0}
+                channels={ws.activeResearch.latestChannels ?? []}
+                peecSkipped={ws.activeResearch.latestPeecSkipped ?? false}
                 runStatus={ws.activeResearch.runStatus}
                 latestRunId={latestRunId}
+                onSendChatMessage={sendMessage}
+                onTestPrompt={ws.testPrompt}
               />
             </div>
           </div>
@@ -454,11 +459,16 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
               <div className="h-full">
                 <PromptsColumn
                   key={ws.activeResearch.id}
+                  researchId={ws.activeResearch.id}
                   prompts={prompts}
                   onToast={showToast}
                   totalChannels={ws.activeResearch.latestTotalChannels ?? 0}
+                  channels={ws.activeResearch.latestChannels ?? []}
+                  peecSkipped={ws.activeResearch.latestPeecSkipped ?? false}
                   runStatus={ws.activeResearch.runStatus}
                   latestRunId={latestRunId}
+                  onSendChatMessage={sendMessage}
+                  onTestPrompt={ws.testPrompt}
                 />
               </div>
             )}

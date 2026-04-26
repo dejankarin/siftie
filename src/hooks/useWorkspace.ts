@@ -97,6 +97,8 @@ interface ApiRun {
   prompts: PortfolioPrompt[];
   totalChannels: number;
   peecSkipped: boolean;
+  /** Active Peec channels at run completion (Session 7+). */
+  channels: Array<{ id: string; description: string }>;
   startedAt: number;
   finishedAt: number | null;
 }
@@ -186,6 +188,14 @@ export interface UseWorkspaceResult {
    * silently if there is no run in flight.
    */
   cancelResearch: () => Promise<void>;
+  /**
+   * Re-run the Peec brand-baseline lookup for one prompt and replace
+   * its row in the active research's portfolio. Resolves with the
+   * updated prompt so callers can compare before/after hits for
+   * analytics. Throws on missing key / Peec failure with `code` set to
+   * a stable short string.
+   */
+  testPrompt: (promptId: string) => Promise<PortfolioPrompt>;
   /**
    * True while the active research has an agent reply in flight. Drives
    * the typing-bubble in `<ChatColumn />`.
@@ -411,6 +421,8 @@ function hydrate(
       runStatus: run?.status ?? null,
       latestRunId: run?.id ?? null,
       latestTotalChannels: run?.totalChannels ?? 0,
+      latestChannels: run?.channels ?? [],
+      latestPeecSkipped: run?.peecSkipped ?? false,
     };
   });
 
@@ -600,11 +612,32 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
                   prompts: PortfolioPrompt[] | unknown;
                   total_channels: number;
                   peec_skipped: boolean;
+                  channels: unknown;
                 }
               | undefined;
             if (!row?.id) return;
             const safePrompts = Array.isArray(row.prompts)
               ? (row.prompts as PortfolioPrompt[])
+              : [];
+            // `channels` is JSONB; defensive parse so a malformed entry
+            // (or a pre-migration row) doesn't crash the Realtime
+            // handler. Same parser shape as `lib/runs.ts#parseChannels`.
+            const safeChannels: Array<{ id: string; description: string }> = Array.isArray(
+              row.channels,
+            )
+              ? (row.channels as unknown[])
+                  .map((entry) =>
+                    entry &&
+                    typeof entry === 'object' &&
+                    typeof (entry as { id?: unknown }).id === 'string' &&
+                    typeof (entry as { description?: unknown }).description === 'string'
+                      ? {
+                          id: (entry as { id: string }).id,
+                          description: (entry as { description: string }).description,
+                        }
+                      : null,
+                  )
+                  .filter((c): c is { id: string; description: string } => c !== null)
               : [];
             setState((s) => {
               if (!s) return s;
@@ -623,6 +656,8 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
                     runStatus: isLatest ? row.status : r.runStatus,
                     latestRunId: isLatest ? row.id : r.latestRunId,
                     latestTotalChannels: isLatest ? row.total_channels : r.latestTotalChannels,
+                    latestChannels: isLatest ? safeChannels : r.latestChannels,
+                    latestPeecSkipped: isLatest ? row.peec_skipped : r.latestPeecSkipped,
                     // Only swap the displayed portfolio when the run
                     // completes — half-baked prompts arrays from a
                     // mid-flight update would briefly empty the column.
@@ -1551,6 +1586,67 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
     }
   }, []);
 
+  /**
+   * Per-prompt Test (Session 7).
+   *
+   * Hits POST /api/prompts/[promptId]/test with the active research's
+   * latest run id. The route refetches the Peec brand baseline and
+   * returns a new FinalPrompt; we splice it into local state so the
+   * card updates instantly. The Realtime UPDATE on `runs.prompts`
+   * follows shortly after — same payload, deduped by id — and would
+   * arrive eventually anyway, but doing the local swap means the
+   * tester gets sub-second feedback instead of waiting on the
+   * subscription round-trip.
+   */
+  const testPrompt = useCallback(async (promptId: string): Promise<PortfolioPrompt> => {
+    const target = stateRef.current?.researches.find(
+      (r) => r.id === stateRef.current?.activeResearchId,
+    );
+    const runId = target?.latestRunId;
+    if (!target || !runId) {
+      const err: Error & { code?: string } = new Error('No completed run to test against.');
+      err.code = 'no_run';
+      throw err;
+    }
+    const res = await fetch(`/api/prompts/${encodeURIComponent(promptId)}/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runId }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      prompt?: PortfolioPrompt;
+      error?: string;
+      message?: string;
+    };
+    if (!res.ok) {
+      const err: Error & { code?: string } = new Error(
+        body.message ?? `Test failed (${res.status})`,
+      );
+      err.code = body.error ?? 'test_failed';
+      throw err;
+    }
+    if (!body.prompt) {
+      const err: Error & { code?: string } = new Error('Test returned no prompt.');
+      err.code = 'invalid_response';
+      throw err;
+    }
+    const updated = body.prompt;
+    setState((s) => {
+      if (!s) return s;
+      return {
+        ...s,
+        researches: s.researches.map((r) => {
+          if (r.id !== target.id) return r;
+          return {
+            ...r,
+            prompts: r.prompts.map((p) => (p.id === updated.id ? updated : p)),
+          };
+        }),
+      };
+    });
+    return updated;
+  }, []);
+
   if (!state || !activeProject || !activeResearch) {
     return null;
   }
@@ -1576,6 +1672,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
     sendMessage,
     runResearch,
     cancelResearch,
+    testPrompt,
     isTyping: pendingMessageResearchIds.has(state.activeResearchId),
   };
 }

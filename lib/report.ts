@@ -43,6 +43,21 @@ export interface BuildMarkdownReportResult {
   filename: string;
 }
 
+/**
+ * Same shape as the Markdown export, but for CSV. We expose it as a
+ * separate result type because Excel-style CSV mime/headers differ.
+ */
+export interface BuildCsvReportResult {
+  csv: string;
+  filename: string;
+  /**
+   * Whether Peec was skipped on this run. The route forwards this so
+   * the analytics event includes the same flag the file itself
+   * encodes in its leading comment line.
+   */
+  peecSkipped: boolean;
+}
+
 function slugify(name: string): string {
   const s = name
     .toLowerCase()
@@ -299,4 +314,87 @@ ${councilTranscriptSection(runMessages)}
   const filename = `${slugify(research.name)}-${day}.md`;
 
   return { markdown, filename };
+}
+
+/**
+ * Escape one cell for RFC 4180 CSV. We always wrap in double quotes —
+ * Excel handles that uniformly and it sidesteps the "does this column
+ * happen to contain a comma" question entirely.
+ */
+function csvCell(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return '""';
+  const s = typeof value === 'number' ? String(value) : value;
+  return `"${s.replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
+}
+
+/**
+ * Build a CSV export for a **completed** run owned by the user. The
+ * file is intentionally flat — one row per prompt — so it round-trips
+ * cleanly into spreadsheets, BI tools, or another LLM.
+ *
+ * If Peec was skipped, the `Hits` and `Total channels` columns are
+ * left blank and a leading `# Peec: skipped` comment line documents
+ * why. Comment line uses `#` so Excel/Sheets ignore it on import as
+ * a malformed row but humans can read it in a text editor.
+ */
+export async function buildCsvReport(
+  clerkUserId: string,
+  runId: string,
+): Promise<BuildCsvReportResult> {
+  const run = await getRunForOwner(clerkUserId, runId);
+  if (!run) {
+    const err = new Error('Run not found');
+    (err as Error & { code?: string }).code = 'not_found';
+    throw err;
+  }
+  if (run.status !== 'complete') {
+    const err = new Error('Run is not complete yet');
+    (err as Error & { code?: string }).code = 'not_ready';
+    throw err;
+  }
+  if (!run.prompts.length) {
+    const err = new Error('This run has no prompts to export');
+    (err as Error & { code?: string }).code = 'empty_prompts';
+    throw err;
+  }
+
+  const { research } = await getResearchWithContext(clerkUserId, run.researchId);
+  const finished = run.finishedAt ?? run.startedAt;
+  const isoDate = new Date(finished).toISOString();
+  const day = isoDate.slice(0, 10);
+
+  const header = ['Cluster', 'Intent', 'Prompt', 'Hits', 'Total channels', 'Council note'];
+  const lines: string[] = [];
+
+  lines.push(`# Siftie prompt portfolio export — ${research.name}`);
+  lines.push(`# Run id: ${run.id}`);
+  lines.push(`# Generated: ${isoDate}`);
+  if (run.peecSkipped) {
+    lines.push(`# Peec: skipped (no key or opted out) — Hits / Total channels columns left blank`);
+  } else {
+    lines.push(
+      `# Peec: live scoring across ${run.totalChannels} channel(s) over the 30 days preceding the run`,
+    );
+  }
+
+  lines.push(header.map(csvCell).join(','));
+  for (const p of run.prompts) {
+    const row = [
+      csvCell(p.cluster),
+      csvCell(p.intent),
+      csvCell(p.text),
+      csvCell(run.peecSkipped ? '' : p.hits),
+      csvCell(run.peecSkipped ? '' : p.totalChannels),
+      csvCell(p.councilNote ?? ''),
+    ];
+    lines.push(row.join(','));
+  }
+
+  // Excel chokes on bare LF — RFC 4180 wants CRLF and that's what
+  // every native spreadsheet app expects. UTF-8 BOM at the front
+  // gets Excel to detect non-ASCII characters correctly.
+  const csv = '\uFEFF' + lines.join('\r\n') + '\r\n';
+  const filename = `${slugify(research.name)}-${day}.csv`;
+
+  return { csv, filename, peecSkipped: run.peecSkipped };
 }

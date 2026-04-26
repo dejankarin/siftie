@@ -22,7 +22,7 @@ Built and deployed in 48-hour sprints, tracked as nine "sessions". As of **commi
 | 6.5 | Stoppable research runs (soft cancellation via `runs.status`) | Shipped |
 | 6.6 | Three-column IA polish (Sources / Chat / Output) + Markdown report download | Shipped |
 | —   | Deep-link routing `/app/[projectId]/[researchId]` + `sources` Realtime sync | Shipped |
-| 7 | Prompts column live (dynamic HitsBar, Show-all drawer, CSV export) | Pending |
+| 7 | Prompts column live (dynamic HitsBar, Show-all drawer, CSV export) | Shipped |
 | 8 | Reply router (Tavily web search) + landing polish + mobile pass | Pending |
 | 9 | Demo prep + PostHog dashboard + 2 evals + 1 cluster view + final README | Pending |
 
@@ -40,6 +40,7 @@ Beyond the original plan, the following also shipped:
 - **PostHog group analytics** so events are also attributed to the active Siftie project.
 - **PostHog source maps** uploaded automatically on every Vercel production build for symbolicated stack traces.
 - **App + global error boundaries** (`app/error.tsx`, `app/global-error.tsx`).
+- **Session 7 prompts column** — dynamic HitsBar that scales to the live Peec channel set with channel-name tooltips (one cell per `model_channel_id`, persisted on `runs.channels` JSONB so the bar labels itself without a refetch); a per-prompt **Test** button that re-fires the Peec brand-baseline lookup via `POST /api/prompts/[promptId]/test` and updates the row inline; a **Show all N** bottom drawer with per-prompt Chair rationale in collapsible `<details>`; a **Generate cluster** popover (Category / Persona / Comparison) that posts a synthetic `Generate a new <Cluster> cluster of prompts.` message into chat for the Session 8 reply router; a **Peec-skipped** dismissible banner (per-research, persisted in `localStorage`), empty-state surface-rate card, and "Hits" sort hidden when there's no Peec data; per-prompt **Test** swaps to **Add Peec key** in the same state; CSV export via `GET /api/research/[runId]/export` (UTF-8 BOM + CRLF for Excel, leading `# Peec: skipped` comment line when applicable) wired to a text button inside the drawer; PostHog client + server events `prompt_copied`, `prompt_tested`, `prompt_test_failed`, `prompt_cluster_generated`, and `csv_exported` with cluster / intent / hit-state / channel-count / surface metadata.
 
 ## Run locally
 

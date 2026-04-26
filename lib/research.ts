@@ -375,6 +375,7 @@ export async function runResearchPipeline(
     let totalChannels = 0;
     let peecSkipped = false;
     let peecSkipReason: string | null = null;
+    let runChannels: Array<{ id: string; description: string }> = [];
 
     try {
       const peec = await fetchPeecHits(
@@ -386,6 +387,7 @@ export async function runResearchPipeline(
       );
       hitsByIndex = peec.hitsByIndex;
       totalChannels = peec.totalChannels;
+      runChannels = peec.channels;
       if (totalChannels > 0) {
         await emitAgentMessage(clerkUserId, researchId, runId, {
           body: `Peec scored each prompt across ${totalChannels} live channels.`,
@@ -474,6 +476,7 @@ export async function runResearchPipeline(
       prompts: finalPrompts,
       totalChannels,
       peecSkipped,
+      channels: runChannels,
     });
 
     await emitAgentMessage(clerkUserId, researchId, runId, {
@@ -567,6 +570,13 @@ export async function runResearchPipeline(
 interface FetchPeecHitsResult {
   hitsByIndex: Record<number, number>;
   totalChannels: number;
+  /**
+   * `model_channel_id` + Peec's human-readable label for each active
+   * channel, in the order Peec returned them. Persisted on the run row
+   * so the client's HitsBar can label each cell on hover. Empty when
+   * Peec was skipped or returned no active channels.
+   */
+  channels: Array<{ id: string; description: string }>;
 }
 
 /**
@@ -609,7 +619,7 @@ async function fetchPeecHits(
 
   const projects = await listProjects(peecKey, tracking);
   if (projects.length === 0) {
-    return { hitsByIndex: {}, totalChannels: 0 };
+    return { hitsByIndex: {}, totalChannels: 0, channels: [] };
   }
   const project = projects[0]!;
 
@@ -620,8 +630,15 @@ async function fetchPeecHits(
   const ownBrand = brands.find((b: PeecBrand) => b.is_own);
   const activeChannels = channels.filter((c: PeecModelChannel) => c.is_active);
   const totalChannels = activeChannels.length;
+  // Capture the active channel labels as we go so the orchestrator can
+  // persist them on the run row, even if the brand-mention lookup
+  // below produces 0 hits — the user still gets a labelled empty bar.
+  const channelLabels = activeChannels.map((c) => ({
+    id: c.id,
+    description: c.description,
+  }));
   if (!ownBrand || totalChannels === 0) {
-    return { hitsByIndex: {}, totalChannels };
+    return { hitsByIndex: {}, totalChannels, channels: channelLabels };
   }
 
   // Pull a 30-day brands report scoped to our own brand × channel. We
@@ -642,7 +659,7 @@ async function fetchPeecHits(
   for (let i = 0; i < _candidates.length; i++) {
     hitsByIndex[i] = baselineChannels;
   }
-  return { hitsByIndex, totalChannels };
+  return { hitsByIndex, totalChannels, channels: channelLabels };
 }
 
 /**

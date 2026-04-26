@@ -23,6 +23,19 @@ import { ForbiddenError } from './workspace';
 
 export type RunStatus = 'pending' | 'running' | 'complete' | 'failed';
 
+/**
+ * One Peec model channel as captured at run completion. Stored on
+ * `runs.channels` JSONB so the client can render the dynamic HitsBar
+ * (one cell per channel, channel name on hover) without hitting Peec
+ * on every render. `id` is the stable `model_channel_id` (e.g.
+ * `openai-0`); `description` is Peec's human-readable label
+ * (e.g. "OpenAI gpt-5").
+ */
+export interface RunChannel {
+  id: string;
+  description: string;
+}
+
 export interface RunRow {
   id: string;
   researchId: string;
@@ -31,6 +44,11 @@ export interface RunRow {
   prompts: FinalPrompt[];
   totalChannels: number;
   peecSkipped: boolean;
+  /**
+   * Active Peec model channels for this run, in the order Peec returned
+   * them. Empty when Peec was skipped or pre-Session-7 runs.
+   */
+  channels: RunChannel[];
   /** epoch milliseconds */
   startedAt: number;
   /** epoch milliseconds, or null while still running. */
@@ -45,9 +63,18 @@ interface DbRunRow {
   prompts: unknown;
   total_channels: number;
   peec_skipped: boolean;
+  /** Same JSONB shape as `RunChannel[]` but typed as `unknown` until parse. */
+  channels: unknown;
   started_at: string;
   finished_at: string | null;
 }
+
+/**
+ * Column list reused on every `runs` select. Pulled out so adding a
+ * column means touching one place instead of five.
+ */
+const RUN_SELECT_COLUMNS =
+  'id, research_id, status, council_depth, prompts, total_channels, peec_skipped, channels, started_at, finished_at';
 
 /**
  * Insert a new run row in `running` state. Caller is the orchestrator,
@@ -71,10 +98,9 @@ export async function createRun(
       prompts: [],
       total_channels: 0,
       peec_skipped: false,
+      channels: [],
     })
-    .select(
-      'id, research_id, status, council_depth, prompts, total_channels, peec_skipped, started_at, finished_at',
-    )
+    .select(RUN_SELECT_COLUMNS)
     .single();
   if (error || !data) throw error ?? new Error('Failed to create run');
   return rowToRun(data as DbRunRow);
@@ -84,6 +110,12 @@ export interface CompleteRunInput {
   prompts: FinalPrompt[];
   totalChannels: number;
   peecSkipped: boolean;
+  /**
+   * Per-channel metadata captured from Peec at run completion. Used by
+   * the client's HitsBar to label each cell. Empty when Peec was
+   * skipped — the client renders the no-Peec banner in that case.
+   */
+  channels: RunChannel[];
 }
 
 /**
@@ -102,8 +134,43 @@ export async function completeRun(runId: string, input: CompleteRunInput): Promi
       prompts: input.prompts,
       total_channels: input.totalChannels,
       peec_skipped: input.peecSkipped,
+      channels: input.channels,
       finished_at: new Date().toISOString(),
     })
+    .eq('id', runId);
+  if (error) throw error;
+}
+
+/**
+ * Replace the prompts JSONB on a run that's already `complete`.
+ *
+ * Used by the per-prompt Test button (Session 7) to refresh hit counts
+ * for one prompt without re-running the whole pipeline. Verifies
+ * ownership through the research owner check; the caller passes the
+ * full new `prompts` array (with the single mutated row) so the
+ * Realtime subscriber gets one consistent UPDATE rather than racing
+ * partial writes.
+ */
+export async function updateRunPrompts(
+  clerkUserId: string,
+  runId: string,
+  prompts: FinalPrompt[],
+): Promise<void> {
+  const supabase = createServiceRoleSupabaseClient();
+  const { data: row, error: readErr } = await supabase
+    .from('runs')
+    .select('research_id, status')
+    .eq('id', runId)
+    .maybeSingle();
+  if (readErr) throw readErr;
+  if (!row) throw new ForbiddenError('Run not found or not owned by this user');
+  await assertResearchOwner(clerkUserId, (row as { research_id: string }).research_id);
+  if ((row as { status: RunStatus }).status !== 'complete') {
+    throw new Error('Cannot update prompts on a run that is not complete');
+  }
+  const { error } = await supabase
+    .from('runs')
+    .update({ prompts })
     .eq('id', runId);
   if (error) throw error;
 }
@@ -219,9 +286,7 @@ export async function getRunForOwner(
   const supabase = createServiceRoleSupabaseClient();
   const { data, error } = await supabase
     .from('runs')
-    .select(
-      'id, research_id, status, council_depth, prompts, total_channels, peec_skipped, started_at, finished_at',
-    )
+    .select(RUN_SELECT_COLUMNS)
     .eq('id', runId)
     .maybeSingle();
   if (error) throw error;
@@ -245,9 +310,7 @@ export async function getLatestRunByResearch(
   const supabase = createServiceRoleSupabaseClient();
   const { data, error } = await supabase
     .from('runs')
-    .select(
-      'id, research_id, status, council_depth, prompts, total_channels, peec_skipped, started_at, finished_at',
-    )
+    .select(RUN_SELECT_COLUMNS)
     .eq('research_id', researchId)
     .order('started_at', { ascending: false })
     .limit(1)
@@ -276,9 +339,7 @@ export async function listLatestRunsForResearches(
   const supabase = createServiceRoleSupabaseClient();
   const { data, error } = await supabase
     .from('runs')
-    .select(
-      'id, research_id, status, council_depth, prompts, total_channels, peec_skipped, started_at, finished_at',
-    )
+    .select(RUN_SELECT_COLUMNS)
     .in('research_id', researchIds)
     .order('started_at', { ascending: false });
   if (error) throw error;
@@ -310,9 +371,31 @@ function rowToRun(row: DbRunRow): RunRow {
     prompts: Array.isArray(row.prompts) ? (row.prompts as FinalPrompt[]) : [],
     totalChannels: row.total_channels,
     peecSkipped: row.peec_skipped,
+    // `channels` is JSONB; same defensive read as `prompts`. Older runs
+    // (pre-Session 7) and Peec-skipped runs come through as `[]`.
+    channels: parseChannels(row.channels),
     startedAt: new Date(row.started_at).getTime(),
     finishedAt: row.finished_at ? new Date(row.finished_at).getTime() : null,
   };
+}
+
+function parseChannels(raw: unknown): RunChannel[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RunChannel[] = [];
+  for (const entry of raw) {
+    if (
+      entry &&
+      typeof entry === 'object' &&
+      typeof (entry as { id?: unknown }).id === 'string' &&
+      typeof (entry as { description?: unknown }).description === 'string'
+    ) {
+      out.push({
+        id: (entry as { id: string }).id,
+        description: (entry as { description: string }).description,
+      });
+    }
+  }
+  return out;
 }
 
 async function assertResearchOwner(clerkUserId: string, researchId: string): Promise<void> {
