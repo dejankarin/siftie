@@ -1,6 +1,5 @@
 /**
- * Gemini Pro wrapper that runs the **Ideate** stage of the research
- * orchestrator.
+ * The **Ideate** stage of the research orchestrator.
  *
  * Inputs:
  *   - the indexed sources (their ContextDocs)
@@ -10,26 +9,35 @@
  * Output:
  *   - up to ~24 candidate prompts grouped by cluster (Category /
  *     Persona / Comparison) and intent (High / Med / Low). The Council
- *     will then keep ~12, refine, and rank them in lib/council.ts.
+ *     then keeps ~12, refines, and ranks them in lib/council.ts.
  *
- * Why a separate file from `lib/gemini.ts` and `lib/interview.ts`:
- *   We're now juggling three different Gemini call sites (ContextDoc
- *   ingest, opening interview, ideate). Trying to express all three
- *   through one helper would mean a soup of optional schema/prompt
- *   parameters. Keeping them separate makes each prompt + schema easy
- *   to reason about; we'll DRY up only when there are 5+ call sites
- *   doing genuinely identical setup.
+ * ## Two-provider strategy
  *
- * BYOK + PostHog patterns identical to `lib/interview.ts`:
- *   - apiKey is always the first argument; never reads process.env.
- *   - Wraps GenAI in `@posthog/ai/gemini` so each call emits a
- *     `$ai_generation` event tagged `feature: 'ideate'`.
- *   - 90s hard timeout (Pro is slower than Flash) + 2 retries via
- *     p-retry, aborting on auth/quota errors.
+ * We try **OpenAI GPT-5.4 (primary)** first and **Gemini Pro
+ * (fallback)** second. Why this order:
+ *
+ *   1. OpenAI is the strongest general-purpose model on prompt-design
+ *      tasks today; the user explicitly asked for it as the primary.
+ *   2. Gemini Pro covers the failure mode where OpenAI is rate-
+ *      limited, the user's OpenAI key is missing/invalid, or OpenAI
+ *      is having an outage. Both providers can answer the same JSON
+ *      schema, so the fallback is fully transparent.
+ *   3. The orchestrator returns metadata about which provider ran +
+ *      why we fell back, so the chat bubble in `lib/research.ts` can
+ *      tell the user "OpenAI was unavailable, so we used Gemini Pro".
+ *
+ * ## BYOK + PostHog
+ *
+ *   - apiKeys are always passed in; we never read process.env.
+ *   - Each call is wrapped via `@posthog/ai` so a `$ai_generation`
+ *     event is emitted with `feature: 'ideate'`, `provider:
+ *     'openai'|'gemini'`, and the run-level traceId.
+ *   - 60-90s hard timeouts via withResilience.
  */
 import 'server-only';
 import { PostHogGoogleGenAI } from '@posthog/ai/gemini';
 import type { ContextDoc } from './ingest/schema';
+import { generateOpenAIJson, OPENAI_IDEATE_MODEL } from './openai';
 import { getPostHogServer } from './posthog';
 import {
   IdeateResponse,
@@ -39,23 +47,15 @@ import {
 import { withResilience } from './resilience';
 
 /**
- * We use the Pro tier (not Flash) for Ideate because the prompt-design
- * step benefits noticeably from stronger reasoning — and we only call
- * it once per run, so the extra cost is bounded (~$0.05/run).
- *
- * `gemini-pro-latest` rolls forward whenever Google ships a new Pro
- * model. If we ever want to pin (e.g. for reproducible council
- * outputs in QA), we'd swap this for an explicit version like
+ * Gemini Pro fallback model. `gemini-pro-latest` rolls forward
+ * whenever Google ships a new Pro model. If we ever want to pin
+ * (e.g. for reproducible council outputs in QA), swap for
  * `gemini-3-pro-preview`.
  */
 const GEMINI_MODEL = 'gemini-pro-latest';
 
-/**
- * Generous timeout: Pro can take 60-80s on a long input + 24-prompt
- * structured output. The orchestrator runs in `waitUntil` so we're
- * not blocking the request handler.
- */
-const TIMEOUT_MS = 90_000;
+/** Generous timeout for the Gemini fallback path. */
+const GEMINI_TIMEOUT_MS = 90_000;
 
 /**
  * Target number of candidate prompts. We aim for 24 (8 per cluster) so
@@ -88,11 +88,20 @@ export interface IdeateInput {
   /**
    * Plain transcript of the chat so far. We pass user replies + the
    * interview questions the agent asked, in chronological order, so
-   * Gemini sees both the "what we asked" and the "what they answered"
-   * sides. Council bubbles from prior runs are intentionally excluded
-   * — they're stale narrative, not user signal.
+   * the model sees both the "what we asked" and the "what they
+   * answered" sides. Council bubbles from prior runs are intentionally
+   * excluded — they're stale narrative, not user signal.
    */
   messages: MessageBrief[];
+}
+
+/**
+ * Caller-supplied keys. At least one must be present, enforced by
+ * the orchestrator before this function is ever called.
+ */
+export interface IdeateKeys {
+  openaiKey?: string | null;
+  geminiKey?: string | null;
 }
 
 export interface IdeateCallOptions {
@@ -103,27 +112,155 @@ export interface IdeateCallOptions {
   posthogProperties?: Record<string, unknown>;
 }
 
+export type IdeateProvider = 'openai' | 'gemini';
+
 /**
- * Generate the candidate prompts for a research run. Returns the parsed
- * + Zod-validated array. Throws on auth/quota/timeout/JSON errors.
+ * Returned alongside the prompts so the orchestrator can decide
+ * whether to emit a "we fell back" chat bubble. `fallbackReason` is
+ * only set when we tried OpenAI first and it failed.
+ */
+export interface IdeateResult {
+  prompts: IdeatePrompt[];
+  providerUsed: IdeateProvider;
+  modelUsed: string;
+  fallbackReason?: string;
+}
+
+/**
+ * Error thrown when *every* configured provider failed during Ideate.
+ * Carries the last-attempted provider so the orchestrator can call
+ * `classifyProviderError(err, err.provider)` and surface a precise
+ * "fix your <provider> key" message in the chat.
+ */
+export class IdeateProviderError extends Error {
+  readonly provider: IdeateProvider;
+  /** Optional second-to-last error when both OpenAI *and* Gemini failed. */
+  readonly precedingError?: unknown;
+  constructor(provider: IdeateProvider, original: unknown, precedingError?: unknown) {
+    const message = original instanceof Error ? original.message : String(original);
+    super(message);
+    this.name = 'IdeateProviderError';
+    this.provider = provider;
+    this.precedingError = precedingError;
+    if (original instanceof Error) this.cause = original;
+  }
+}
+
+/**
+ * Generate the candidate prompts for a research run. Tries OpenAI
+ * GPT-5.4 first; on any error, falls back to Gemini Pro (provided a
+ * Gemini key is available). Returns the parsed + Zod-validated array
+ * along with metadata about which provider answered.
  */
 export async function generateIdeatePrompts(
-  apiKey: string,
+  keys: IdeateKeys,
   input: IdeateInput,
   opts: IdeateCallOptions,
-): Promise<IdeatePrompt[]> {
-  if (!apiKey || apiKey.length < 8) {
-    throw new Error('Gemini API key missing or too short');
-  }
+): Promise<IdeateResult> {
   if (input.sources.length === 0) {
     throw new Error('Cannot ideate without any sources');
   }
 
-  const phClient = getPostHogServer();
-  const ai = new PostHogGoogleGenAI({ apiKey, posthog: phClient });
+  const hasOpenAI = !!(keys.openaiKey && keys.openaiKey.length >= 8);
+  const hasGemini = !!(keys.geminiKey && keys.geminiKey.length >= 8);
+
+  if (!hasOpenAI && !hasGemini) {
+    throw new Error(
+      'No Ideate provider available. Add an OpenAI key (preferred) or a Gemini key in Settings.',
+    );
+  }
 
   const briefs = input.sources.map((s) => buildSourceBrief(s.kind, s.contextDoc));
   const userPrompt = buildUserPrompt(input.researchTitle, briefs, input.messages);
+
+  // ---- Primary: OpenAI GPT-5.4 ------------------------------------------
+  if (hasOpenAI) {
+    try {
+      const prompts = await runOpenAIIdeate(keys.openaiKey!, userPrompt, opts);
+      return {
+        prompts,
+        providerUsed: 'openai',
+        modelUsed: OPENAI_IDEATE_MODEL,
+      };
+    } catch (openAiErr) {
+      // No Gemini fallback configured — bubble the OpenAI error up so
+      // the orchestrator can show a precise "fix your OpenAI key"
+      // message via classifyProviderError.
+      if (!hasGemini) {
+        throw new IdeateProviderError('openai', openAiErr);
+      }
+      // Continue to Gemini fallback below; remember why.
+      const reason = openAiErr instanceof Error ? openAiErr.message : String(openAiErr);
+      try {
+        const prompts = await runGeminiIdeate(keys.geminiKey!, userPrompt, opts);
+        return {
+          prompts,
+          providerUsed: 'gemini',
+          modelUsed: GEMINI_MODEL,
+          fallbackReason: reason,
+        };
+      } catch (geminiErr) {
+        // Both providers failed. Surface the Gemini error (the latest
+        // one) but keep OpenAI's around for diagnostic logs.
+        throw new IdeateProviderError('gemini', geminiErr, openAiErr);
+      }
+    }
+  }
+
+  // ---- No OpenAI key at all → straight Gemini ---------------------------
+  try {
+    const prompts = await runGeminiIdeate(keys.geminiKey!, userPrompt, opts);
+    return {
+      prompts,
+      providerUsed: 'gemini',
+      modelUsed: GEMINI_MODEL,
+    };
+  } catch (geminiErr) {
+    throw new IdeateProviderError('gemini', geminiErr);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Provider-specific runners
+// ---------------------------------------------------------------------------
+
+async function runOpenAIIdeate(
+  apiKey: string,
+  userPrompt: string,
+  opts: IdeateCallOptions,
+): Promise<IdeatePrompt[]> {
+  const text = await generateOpenAIJson(
+    apiKey,
+    {
+      system: SYSTEM_INSTRUCTION,
+      user: userPrompt,
+      schema: IdeateResponseJsonSchema as Record<string, unknown>,
+      schemaName: 'ideate_response',
+      temperature: 0.7,
+      maxTokens: 4000,
+    },
+    {
+      posthogDistinctId: opts.posthogDistinctId,
+      posthogTraceId: opts.posthogTraceId,
+      posthogPrivacyMode: opts.posthogPrivacyMode,
+      posthogProperties: {
+        tag: 'ideate_prompts',
+        target_count: TARGET_PROMPT_COUNT,
+        ideate_role: 'primary',
+        ...opts.posthogProperties,
+      },
+    },
+  );
+  return parseAndTrim(text);
+}
+
+async function runGeminiIdeate(
+  apiKey: string,
+  userPrompt: string,
+  opts: IdeateCallOptions,
+): Promise<IdeatePrompt[]> {
+  const phClient = getPostHogServer();
+  const ai = new PostHogGoogleGenAI({ apiKey, posthog: phClient });
 
   const response = await withResilience(
     () =>
@@ -148,11 +285,13 @@ export async function generateIdeatePrompts(
           feature: 'ideate',
           tag: 'ideate_prompts',
           target_count: TARGET_PROMPT_COUNT,
+          provider: 'gemini',
+          ideate_role: 'fallback',
           ...opts.posthogProperties,
         },
       }),
     {
-      timeoutMs: TIMEOUT_MS,
+      timeoutMs: GEMINI_TIMEOUT_MS,
       retries: 2,
       minTimeoutMs: 1_000,
       maxTimeoutMs: 4_000,
@@ -167,17 +306,19 @@ export async function generateIdeatePrompts(
   if (typeof text !== 'string' || text.length === 0) {
     throw new Error('Gemini returned an empty Ideate response');
   }
+  return parseAndTrim(text);
+}
 
+function parseAndTrim(text: string): IdeatePrompt[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error('Gemini returned non-JSON Ideate response');
+    throw new Error('Ideate model returned non-JSON response');
   }
-
   const validated = IdeateResponse.parse(parsed);
-  // Trim to keep the council's workload bounded. We don't shuffle — the
-  // model already orders by perceived strength in most runs.
+  // Trim to keep the council's workload bounded. We don't shuffle —
+  // the model already orders by perceived strength in most runs.
   return validated.prompts.slice(0, TARGET_MAX);
 }
 
@@ -192,7 +333,8 @@ function buildSourceBrief(kind: SourceBrief['kind'], doc: ContextDoc): SourceBri
     summary: doc.summary,
     topics: doc.topics.slice(0, 12),
     // Cap facts per source so 20 sources × 15 facts doesn't blow the
-    // prompt window. Pro has a 1M token context but we don't need it.
+    // prompt window. Both Pro and GPT-5.4 have huge contexts but we
+    // don't need them.
     facts: doc.facts.slice(0, 12),
   };
 }

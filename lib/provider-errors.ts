@@ -10,7 +10,7 @@
  * into a small, typed shape that API routes can return and client code can
  * explain in plain English.
  */
-export type ProviderName = 'gemini' | 'tavily' | 'openrouter' | 'peec';
+export type ProviderName = 'gemini' | 'openai' | 'tavily' | 'openrouter' | 'peec';
 
 export type ProviderErrorCode =
   | 'quota_exhausted'
@@ -79,6 +79,8 @@ function providerLabel(provider: ProviderName): string {
   switch (provider) {
     case 'gemini':
       return 'Gemini';
+    case 'openai':
+      return 'OpenAI';
     case 'tavily':
       return 'Tavily';
     case 'openrouter':

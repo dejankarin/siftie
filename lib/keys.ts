@@ -9,8 +9,8 @@ import 'server-only';
 import { decrypt, encrypt } from './crypto';
 import { createServiceRoleSupabaseClient } from './supabase/server';
 
-export type Provider = 'gemini' | 'openrouter' | 'tavily' | 'peec';
-export const PROVIDERS: ReadonlyArray<Provider> = ['gemini', 'openrouter', 'tavily', 'peec'];
+export type Provider = 'gemini' | 'openai' | 'openrouter' | 'tavily' | 'peec';
+export const PROVIDERS: ReadonlyArray<Provider> = ['gemini', 'openai', 'openrouter', 'tavily', 'peec'];
 
 export interface KeyStatus {
   provider: Provider;

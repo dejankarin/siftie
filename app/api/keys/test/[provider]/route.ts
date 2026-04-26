@@ -10,6 +10,7 @@ import { getUserApiKey, recordKeyTest, type Provider, PROVIDERS } from '@/lib/ke
  *
  * Provider-specific calls (chosen for cheapness — none consume LLM tokens):
  *   gemini      GET https://generativelanguage.googleapis.com/v1beta/models?key=...
+ *   openai      GET https://api.openai.com/v1/models with Authorization (free)
  *   openrouter  GET https://openrouter.ai/api/v1/models with Authorization
  *   tavily      POST https://api.tavily.com/search { query:'hello', max_results:1 }
  *               (Tavily has no free /models endpoint; a 1-result search costs the
@@ -63,6 +64,17 @@ async function runProviderTest(provider: Provider, key: string): Promise<void> {
         if (!res.ok) {
           throw new Error(await readProviderError(res, 'Gemini'));
         }
+        return;
+      }
+      case 'openai': {
+        const res = await fetch('https://api.openai.com/v1/models', {
+          signal: controller.signal,
+          headers: {
+            Authorization: `Bearer ${key}`,
+            Accept: 'application/json',
+          },
+        });
+        if (!res.ok) throw new Error(await readProviderError(res, 'OpenAI'));
         return;
       }
       case 'openrouter': {

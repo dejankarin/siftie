@@ -36,7 +36,11 @@
  */
 import 'server-only';
 import { runCouncil, type CouncilEmit } from './council';
-import { generateIdeatePrompts } from './ideate';
+import {
+  IdeateProviderError,
+  generateIdeatePrompts,
+  type IdeateResult,
+} from './ideate';
 import { getUserApiKey } from './keys';
 import { createMessage } from './messages';
 import {
@@ -85,11 +89,15 @@ export interface StartRunResult {
  * `runResearchPipeline`.
  *
  * Throws `Error` with a `cause` of one of the known short codes:
- *   - 'no_sources'         — the research has no indexed sources
- *   - 'no_user_messages'   — the user has not sent any chat messages
- *   - 'missing_gemini_key' — Gemini key not configured
+ *   - 'no_sources'             — the research has no indexed sources
+ *   - 'no_user_messages'       — the user has not sent any chat messages
+ *   - 'missing_ideate_key'     — neither OpenAI nor Gemini key is configured
  *   - 'missing_openrouter_key' — OpenRouter key not configured
  * Callers (the API route) translate these into 4xx responses.
+ *
+ * Ideate uses **OpenAI GPT-5.4 as the primary** model with **Gemini Pro
+ * as the fallback**. Either key on its own is enough to start a run; we
+ * only block when both are missing.
  */
 export async function startResearchRun(
   clerkUserId: string,
@@ -112,16 +120,18 @@ export async function startResearchRun(
       'Send at least one chat message so the agent has interview answers to ground the prompts.',
     );
   }
-  // Pre-check the keys we MUST have. (Peec is optional; we degrade
-  // gracefully if it's missing.)
-  const [geminiKey, openrouterKey] = await Promise.all([
+  // Pre-check the keys we MUST have. Ideate requires *at least one of*
+  // OpenAI (primary) or Gemini (fallback). OpenRouter is required for
+  // the Council. Peec is optional; we degrade gracefully without it.
+  const [openaiKey, geminiKey, openrouterKey] = await Promise.all([
+    getUserApiKey(clerkUserId, 'openai'),
     getUserApiKey(clerkUserId, 'gemini'),
     getUserApiKey(clerkUserId, 'openrouter'),
   ]);
-  if (!geminiKey) {
+  if (!openaiKey && !geminiKey) {
     throw researchError(
-      'missing_gemini_key',
-      'Add your Gemini API key in Settings, then try again.',
+      'missing_ideate_key',
+      'Add your OpenAI key (preferred) or Gemini key in Settings, then try again.',
     );
   }
   if (!openrouterKey) {
@@ -156,18 +166,19 @@ export async function runResearchPipeline(
     // -----------------------------------------------------------------
     // Setup: keys + research metadata + chat transcript + sources
     // -----------------------------------------------------------------
-    const [geminiKey, openrouterKey, peecKey, privacyAllowsCapture] =
+    const [openaiKey, geminiKey, openrouterKey, peecKey, privacyAllowsCapture] =
       await Promise.all([
+        getUserApiKey(clerkUserId, 'openai'),
         getUserApiKey(clerkUserId, 'gemini'),
         getUserApiKey(clerkUserId, 'openrouter'),
         getUserApiKey(clerkUserId, 'peec'),
         readPosthogCaptureLlm(clerkUserId),
       ]);
-    if (!geminiKey || !openrouterKey) {
+    if ((!openaiKey && !geminiKey) || !openrouterKey) {
       // Defensive: startResearchRun already checked, but a key could
       // have been deleted between the precheck and now.
       throw researchError(
-        !geminiKey ? 'missing_gemini_key' : 'missing_openrouter_key',
+        !openrouterKey ? 'missing_openrouter_key' : 'missing_ideate_key',
         'Required API key was removed before the run started.',
       );
     }
@@ -191,12 +202,12 @@ export async function runResearchPipeline(
     });
 
     // -----------------------------------------------------------------
-    // Stage 1 — Ideate
+    // Stage 1 — Ideate (OpenAI primary, Gemini fallback)
     // -----------------------------------------------------------------
-    let candidates: IdeatePrompt[];
+    let ideate: IdeateResult;
     try {
-      candidates = await generateIdeatePrompts(
-        geminiKey,
+      ideate = await generateIdeatePrompts(
+        { openaiKey, geminiKey },
         {
           researchTitle: research.name,
           sources: sources.map((s) => ({ kind: s.kind, contextDoc: s.contextDoc })),
@@ -210,22 +221,41 @@ export async function runResearchPipeline(
         },
       );
     } catch (err) {
-      const classified = classifyProviderError(err, 'gemini');
-      await emitAgentMessage(clerkUserId, researchId, runId, {
-        body: `Ideate failed: ${classified.message}`,
-      });
+      // Use the provider attached by IdeateProviderError so the user
+      // gets a "fix your <provider> key" message about the actual
+      // failing provider, not a hardcoded one.
+      const provider: ProviderName =
+        err instanceof IdeateProviderError ? err.provider : 'openai';
+      const classified = classifyProviderError(err, provider);
+      // If both providers were tried and both failed, name them both.
+      const bothFailed =
+        err instanceof IdeateProviderError && err.precedingError !== undefined;
+      const body = bothFailed
+        ? `Ideate failed: OpenAI was unavailable and Gemini also failed — ${classified.message}`
+        : `Ideate failed: ${classified.message}`;
+      await emitAgentMessage(clerkUserId, researchId, runId, { body });
       throw err;
     }
 
+    const candidates = ideate.prompts;
     if (candidates.length === 0) {
       await emitAgentMessage(clerkUserId, researchId, runId, {
-        body: 'Gemini returned no candidate prompts — please try again.',
+        body: `${ideateProviderLabel(ideate.providerUsed)} returned no candidate prompts — please try again.`,
       });
-      throw researchError('empty_ideate', 'Gemini returned no candidate prompts');
+      throw researchError('empty_ideate', 'Ideate returned no candidate prompts');
+    }
+
+    if (ideate.fallbackReason) {
+      // OpenAI was tried first but failed; Gemini saved the run. Tell
+      // the user what happened so the model attribution makes sense
+      // and they know to top up their OpenAI key/quota.
+      await emitAgentMessage(clerkUserId, researchId, runId, {
+        body: `OpenAI GPT-5.4 was unavailable, so I used Gemini Pro as the fallback. ${ideate.fallbackReason}`,
+      });
     }
 
     await emitAgentMessage(clerkUserId, researchId, runId, {
-      body: `Drafted ${candidates.length} candidate prompts (${countByCluster(candidates)}). Sending them to the Council.`,
+      body: `Drafted ${candidates.length} candidate prompts via ${ideateProviderLabel(ideate.providerUsed)} (${countByCluster(candidates)}). Sending them to the Council.`,
     });
 
     // -----------------------------------------------------------------
@@ -541,6 +571,10 @@ async function emitAgentMessage(
 
 function depthLabel(depth: CouncilDepth): string {
   return depth === 'quick' ? 'quick · 3 reviewers' : 'standard · 4 reviewers';
+}
+
+function ideateProviderLabel(provider: 'openai' | 'gemini'): string {
+  return provider === 'openai' ? 'OpenAI GPT-5.4' : 'Gemini Pro';
 }
 
 function countByCluster(prompts: IdeatePrompt[]): string {

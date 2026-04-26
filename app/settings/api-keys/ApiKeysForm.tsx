@@ -19,10 +19,17 @@ const PROVIDER_META: Record<Provider, {
   helpUrl: string;
   helpText: string;
 }> = {
+  openai: {
+    label: 'OpenAI (GPT-5.4)',
+    required: true,
+    caption: 'Primary model for Ideate (candidate prompt generation). Direct from platform.openai.com.',
+    helpUrl: 'https://platform.openai.com/api-keys',
+    helpText: 'Get a key from OpenAI Platform',
+  },
   gemini: {
     label: 'Google Gemini',
     required: true,
-    caption: 'Powers source ingestion (Flash) and Council reviewers/Chair (Pro).',
+    caption: 'Source ingestion (Flash) + Ideate fallback (Pro) when OpenAI is unavailable.',
     helpUrl: 'https://aistudio.google.com/apikey',
     helpText: 'Get a key from Google AI Studio',
   },
@@ -49,7 +56,7 @@ const PROVIDER_META: Record<Provider, {
   },
 };
 
-const ORDER: Provider[] = ['gemini', 'openrouter', 'tavily', 'peec'];
+const ORDER: Provider[] = ['openai', 'gemini', 'openrouter', 'tavily', 'peec'];
 
 interface ApiKeysFormProps {
   initialStatus: KeyStatus[];

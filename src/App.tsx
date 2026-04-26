@@ -189,9 +189,13 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
         case 'no_user_messages':
           showToast('Send a chat message so I have your answers');
           break;
-        case 'missing_gemini_key':
+        case 'missing_ideate_key':
         case 'missing_openrouter_key':
-          showToast(`Missing ${maybe.code === 'missing_gemini_key' ? 'Gemini' : 'OpenRouter'} key`);
+          showToast(
+            maybe.code === 'missing_ideate_key'
+              ? 'Add your OpenAI key (preferred) or Gemini key'
+              : 'Missing OpenRouter key',
+          );
           window.location.href = '/settings/api-keys?onboarding=1';
           break;
         default:
