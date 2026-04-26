@@ -7,7 +7,8 @@ import {
   type ReactNode,
 } from 'react';
 import { SOURCE_TYPES } from '../data/mock';
-import type { Source } from '../types';
+import type { CouncilDepth, Source } from '../types';
+import { CouncilRunButton } from './CouncilRunButton';
 import type { AddTab } from './AddSourceModal';
 
 type ViewMode = 'compact' | 'detailed';
@@ -302,6 +303,13 @@ export interface SourcesColumnProps {
   onRenameResearch: (name: string) => void;
   renameOnMount?: boolean;
   onRenameConsumed?: () => void;
+  /** Council run controls (also row-persisted depth). */
+  councilDepth: CouncilDepth;
+  onCouncilDepthChange: (depth: CouncilDepth) => void;
+  onRunResearch: () => void;
+  onCancelResearch: () => void;
+  runStatus: 'pending' | 'running' | 'complete' | 'failed' | null | undefined;
+  canRunCouncil: boolean;
 }
 
 const TYPE_ORDER: Record<Source['type'], number> = { pdf: 0, url: 1, doc: 2, md: 3 };
@@ -324,6 +332,12 @@ export function SourcesColumn({
   onRenameResearch,
   renameOnMount = false,
   onRenameConsumed,
+  councilDepth,
+  onCouncilDepthChange,
+  onRunResearch,
+  onCancelResearch,
+  runStatus,
+  canRunCouncil,
 }: SourcesColumnProps) {
   const [view, setView] = useState<ViewMode>(getInitialView);
   const [sort, setSort] = useState<SortMode>('recent');
@@ -512,7 +526,7 @@ export function SourcesColumn({
         </div>
       )}
 
-      <div className={`flex-1 min-h-0 scroll-y px-3 pb-6 ${view === 'compact' ? 'space-y-1' : 'space-y-2.5 px-5'}`}>
+      <div className={`flex-1 min-h-0 scroll-y px-3 pb-3 ${view === 'compact' ? 'space-y-1' : 'space-y-2.5 px-5'}`}>
         {sources.length === 0 ? (
           <div className="mx-2 border border-dashed border-[var(--line)] rounded-2xl p-8 text-center">
             <p className="text-[13px] font-medium text-[var(--ink)]">Upload contents for this research</p>
@@ -549,6 +563,37 @@ export function SourcesColumn({
           ))
         )}
       </div>
+
+      {sources.length > 0 && (
+        <div className="shrink-0 px-5 pb-5 pt-1 border-t border-[var(--line-2)] mt-auto">
+          <p className="text-[12px] text-[var(--ink-2)] leading-snug mb-3">
+            Import your indexed sources into the Council chat and start the run — no need to type a message first.
+          </p>
+          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
+            <label className="flex items-center gap-1.5 text-[11.5px] text-[var(--ink-3)] min-w-0 sm:flex-1">
+              <span className="shrink-0">Council</span>
+              <select
+                value={councilDepth}
+                onChange={(e) => onCouncilDepthChange(e.target.value as CouncilDepth)}
+                disabled={runStatus === 'running' || runStatus === 'pending'}
+                className="min-w-0 flex-1 appearance-none pill bg-[var(--surface)] text-[11.5px] text-[var(--ink-2)] pl-2 pr-2.5 py-0.5 cursor-pointer disabled:opacity-50"
+                aria-label="Council depth"
+              >
+                <option value="quick">Quick · 3 reviewers</option>
+                <option value="standard">Standard · 4 reviewers</option>
+              </select>
+            </label>
+            <CouncilRunButton
+              onClick={onRunResearch}
+              onCancel={onCancelResearch}
+              status={runStatus}
+              disabled={!canRunCouncil}
+              primaryLabel="Send sources to Council"
+              className="w-full sm:w-auto min-h-8 sm:shrink-0 justify-center"
+            />
+          </div>
+        </div>
+      )}
     </section>
   );
 }

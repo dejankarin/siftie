@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { CouncilDepth, Message } from '../types';
+import type { Message } from '../types';
 
 /**
  * Pick the label + chip color for a council bubble. Reviewers are
@@ -97,25 +97,6 @@ export interface ChatColumnProps {
   isTyping: boolean;
   sourcesCount: number;
   analyzing: boolean;
-  /**
-   * Session 6: Council depth dropdown (Quick = 3 reviewers,
-   * Standard = 4 reviewers). Persisted on the research row server-side.
-   */
-  councilDepth: CouncilDepth;
-  onCouncilDepthChange: (depth: CouncilDepth) => void;
-  /**
-   * Session 6: triggers a research run. Disabled when a run is
-   * already pending/running so the user can't double-fire.
-   */
-  onRunResearch: () => void;
-  /**
-   * Cancel the in-flight run. Only invoked when `runStatus` is
-   * `pending` or `running`; the button hides itself otherwise.
-   */
-  onCancelResearch: () => void;
-  runStatus: 'pending' | 'running' | 'complete' | 'failed' | null | undefined;
-  /** Disable Run if the user hasn't sent any messages or added sources yet. */
-  canRun: boolean;
 }
 
 const SESSION_DATE = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date());
@@ -126,12 +107,6 @@ export function ChatColumn({
   isTyping,
   sourcesCount,
   analyzing,
-  councilDepth,
-  onCouncilDepthChange,
-  onRunResearch,
-  onCancelResearch,
-  runStatus,
-  canRun,
 }: ChatColumnProps) {
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -226,132 +201,8 @@ export function ChatColumn({
             </button>
           </div>
         </div>
-
-        {/*
-          Council bar: depth selector + Run button. Lives outside the
-          textarea card so users see it as a separate "kick off the
-          big LLM run" affordance rather than a hidden settings flag.
-        */}
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <label className="flex items-center gap-1.5 text-[11.5px] text-[var(--ink-3)]">
-            <span>Council</span>
-            <select
-              value={councilDepth}
-              onChange={(e) => onCouncilDepthChange(e.target.value as CouncilDepth)}
-              disabled={runStatus === 'running' || runStatus === 'pending'}
-              className="appearance-none pill bg-[var(--surface)] text-[11.5px] text-[var(--ink-2)] pl-2 pr-2.5 py-0.5 cursor-pointer disabled:opacity-50"
-              aria-label="Council depth"
-            >
-              <option value="quick">Quick · 3 reviewers</option>
-              <option value="standard">Standard · 4 reviewers</option>
-            </select>
-          </label>
-          <RunResearchButton
-            onClick={onRunResearch}
-            onCancel={onCancelResearch}
-            status={runStatus}
-            disabled={!canRun}
-          />
-        </div>
         <p className="text-center mt-2 text-[10.5px] text-[var(--ink-3)]">Siftie uses your sources as the only context. Replies cite source IDs.</p>
       </div>
     </section>
-  );
-}
-
-/**
- * The Run / Stop button is its own component because it has 4 visual
- * states and inlining the branching logic would make the composer
- * hard to read:
- *
- *   - `disabled` (no sources or no chat messages) → muted + tooltip
- *   - `pending` / `running` → spinner + "Working…" by default; on hover
- *     it morphs into a clickable "Stop" button that calls `onCancel`.
- *     Same pattern as ChatGPT/Cursor — gives the user an out from a
- *     run that's taking too long without surrendering visual real
- *     estate to a permanent second button.
- *   - `failed` → "Retry research" pill (still clickable, hits onClick)
- *   - `complete` / null → primary "Run research" pill (hits onClick)
- *
- * Cancellation note: clicking Stop posts to /api/research/cancel which
- * flips the runs row to `failed`. The orchestrator polls that row
- * between stages and bails out, but any LLM call already in flight
- * still completes in the background — that's a hard trade-off of
- * `waitUntil` on serverless. The UI flips to "Run research" instantly
- * via the optimistic local state in `useWorkspace.cancelResearch`.
- */
-function RunResearchButton({
-  onClick,
-  onCancel,
-  status,
-  disabled,
-}: {
-  onClick: () => void;
-  onCancel: () => void;
-  status: 'pending' | 'running' | 'complete' | 'failed' | null | undefined;
-  disabled: boolean;
-}) {
-  const busy = status === 'pending' || status === 'running';
-  const failed = status === 'failed';
-  const [hoverStop, setHoverStop] = useState(false);
-
-  if (busy) {
-    return (
-      <button
-        type="button"
-        onClick={onCancel}
-        onMouseEnter={() => setHoverStop(true)}
-        onMouseLeave={() => setHoverStop(false)}
-        onFocus={() => setHoverStop(true)}
-        onBlur={() => setHoverStop(false)}
-        title="Stop the current Council run"
-        aria-label="Stop research run"
-        className={`rounded-full px-3.5 h-8 text-[12px] font-medium transition flex items-center gap-1.5
-          ${
-            hoverStop
-              ? 'border border-[var(--line)] bg-[var(--surface)] text-[var(--ink)] hover:border-[var(--accent)] cursor-pointer'
-              : 'bg-[var(--btn-disabled-bg)] text-[var(--btn-disabled-fg)] cursor-pointer'
-          }`}
-      >
-        {hoverStop ? (
-          <>
-            <span
-              aria-hidden="true"
-              className="w-2.5 h-2.5 rounded-[2px] bg-current"
-            ></span>
-            Stop
-          </>
-        ) : (
-          <>
-            <span className="w-3 h-3 rounded-full border border-current border-t-transparent animate-spin"></span>
-            Working…
-          </>
-        )}
-      </button>
-    );
-  }
-
-  const label = failed ? 'Retry research' : 'Run research';
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={
-        disabled
-          ? 'Add at least one source and send a chat message first.'
-          : 'Generate a fresh prompt portfolio with the Council'
-      }
-      className={`rounded-full px-3.5 h-8 text-[12px] font-medium transition flex items-center gap-1.5
-        ${
-          disabled
-            ? 'bg-[var(--btn-disabled-bg)] text-[var(--btn-disabled-fg)] cursor-not-allowed'
-            : failed
-              ? 'border border-[var(--line)] bg-[var(--surface)] text-[var(--ink)] hover:border-[var(--accent)]'
-              : 'bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] hover:bg-[var(--btn-primary-hover)]'
-        }`}
-    >
-      {label}
-    </button>
   );
 }

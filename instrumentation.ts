@@ -35,26 +35,40 @@ const POSTHOG_TOKEN = process.env.NEXT_PUBLIC_POSTHOG_KEY ?? '';
 // EU cloud — see .env.local NEXT_PUBLIC_POSTHOG_HOST.
 const POSTHOG_LOGS_URL = 'https://eu.i.posthog.com/i/v1/logs';
 
-export const loggerProvider = new LoggerProvider({
-  resource: resourceFromAttributes({
-    'service.name': 'siftie-app',
-    'deployment.environment':
-      process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? 'development',
-  }),
-  processors: POSTHOG_TOKEN
-    ? [
-        new BatchLogRecordProcessor(
-          new OTLPLogExporter({
-            url: POSTHOG_LOGS_URL,
-            headers: {
-              Authorization: `Bearer ${POSTHOG_TOKEN}`,
-              'Content-Type': 'application/json',
-            },
-          }),
-        ),
-      ]
-    : [],
-});
+type LoggerProviderLike = Pick<LoggerProvider, 'getLogger' | 'forceFlush'>;
+
+function createLoggerProvider(): LoggerProviderLike {
+  if (process.env.NEXT_RUNTIME !== 'nodejs') {
+    return {
+      getLogger: (name, version, options) => logs.getLogger(name, version, options),
+      forceFlush: async () => undefined,
+    };
+  }
+
+  const isProd = process.env.VERCEL_ENV === 'production';
+  return new LoggerProvider({
+    resource: resourceFromAttributes({
+      'service.name': 'siftie-app',
+      'deployment.environment':
+        process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? 'development',
+    }),
+    processors: POSTHOG_TOKEN && isProd
+      ? [
+          new BatchLogRecordProcessor(
+            new OTLPLogExporter({
+              url: POSTHOG_LOGS_URL,
+              headers: {
+                Authorization: `Bearer ${POSTHOG_TOKEN}`,
+                'Content-Type': 'application/json',
+              },
+            }),
+          ),
+        ]
+      : [],
+  });
+}
+
+export const loggerProvider = createLoggerProvider();
 
 export function register() {
   // Production-only: preview deploys + local dev should not ship logs to

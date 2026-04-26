@@ -151,9 +151,6 @@ function PromptCard({
 export interface PromptsColumnProps {
   prompts: PortfolioPrompt[];
   onToast: (msg: string) => void;
-  newId: string | null;
-  onGenerateMore: () => void;
-  generating: boolean;
   /**
    * Total channels for the latest run (used as fallback when an
    * individual prompt has no `totalChannels` field). 0 when Peec was
@@ -167,9 +164,6 @@ export interface PromptsColumnProps {
 export function PromptsColumn({
   prompts,
   onToast,
-  newId,
-  onGenerateMore,
-  generating,
   totalChannels,
   runStatus,
 }: PromptsColumnProps) {
@@ -312,28 +306,10 @@ export function PromptsColumn({
             key={p.id}
             prompt={p}
             onCopy={copy}
-            isNew={p.id === newId}
+            isNew={false}
             totalChannels={totalChannels}
           />
         ))}
-      </div>
-
-      <div className="px-5 pb-5 pt-2 border-t border-[var(--line-2)] mt-auto">
-        <button
-          type="button"
-          onClick={onGenerateMore}
-          disabled={generating}
-          className="w-full py-2.5 rounded-xl border border-[var(--line)] bg-[var(--surface)] hover:border-[var(--accent)] hover:text-[var(--accent-ink)] text-[13px] font-medium text-[var(--ink-2)] transition flex items-center justify-center gap-2 disabled:opacity-60"
-        >
-          {generating ? (
-            <>
-              <span className="w-3 h-3 rounded-full border border-[var(--accent)] border-t-transparent animate-spin"></span>
-              Drafting from sources…
-            </>
-          ) : (
-            <span>Generate sustainability cluster</span>
-          )}
-        </button>
       </div>
     </section>
   );

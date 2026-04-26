@@ -3,8 +3,8 @@
  * for a single "Run research" command.
  *
  * Lifecycle:
- *   1. `startResearchRun` validates inputs (key + at least one source +
- *      at least one user message in the chat) and creates a `runs` row
+ *   1. `startResearchRun` validates inputs (keys, at least one source,
+ *      and either an existing user message or an auto-seeded line) and creates a `runs` row
  *      in `running` state. Returns the `runId` immediately so the API
  *      route can hand back a 202.
  *
@@ -43,7 +43,6 @@ import {
 } from './ideate';
 import { getUserApiKey } from './keys';
 import { flushLogs, log } from './logger';
-import { createMessage } from './messages';
 import {
   PeecKeyMissingError,
   listBrands,
@@ -68,9 +67,18 @@ import {
   isRunCancelled,
 } from './runs';
 import { listSourcesForResearch } from './sources';
-import { listMessagesForResearch } from './messages';
+import { createMessage, listMessagesForResearch } from './messages';
 import { FLAG_KEYS, getServerFlag } from './flags';
 import { getProjectIdForResearch, getResearchWithContext } from './workspace';
+
+/**
+ * When the user starts a Council run from the Sources column without
+ * having chatted yet, we persist this line server-side. It does **not** go
+ * through `POST /api/messages`, so the opening 6-question interview is
+ * skipped — the pipeline uses sources + this line as ground truth.
+ */
+const COUNCIL_SEED_USER_MESSAGE =
+  'Use my indexed sources as context. Run the Council to build the prompt portfolio.';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -93,7 +101,7 @@ export interface StartRunResult {
  *
  * Throws `Error` with a `cause` of one of the known short codes:
  *   - 'no_sources'             — the research has no indexed sources
- *   - 'no_user_messages'       — the user has not sent any chat messages
+ *   - 'no_user_messages'       — cannot establish a user message (defensive; seed should prevent)
  *   - 'missing_ideate_key'     — neither OpenAI nor Gemini key is configured
  *   - 'missing_openrouter_key' — OpenRouter key not configured
  * Callers (the API route) translate these into 4xx responses.
@@ -116,7 +124,15 @@ export async function startResearchRun(
   if (sources.length === 0) {
     throw researchError('no_sources', 'Add at least one source before running research.');
   }
-  const messages = await listMessagesForResearch(clerkUserId, researchId);
+  let messages = await listMessagesForResearch(clerkUserId, researchId);
+  if (!messages.some((m) => m.role === 'user')) {
+    await createMessage(clerkUserId, {
+      researchId,
+      role: 'user',
+      body: COUNCIL_SEED_USER_MESSAGE,
+    });
+    messages = await listMessagesForResearch(clerkUserId, researchId);
+  }
   if (!messages.some((m) => m.role === 'user')) {
     throw researchError(
       'no_user_messages',

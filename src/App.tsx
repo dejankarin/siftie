@@ -15,7 +15,7 @@ import { TopBar } from './components/TopBar';
 import { useTheme } from './hooks/useTheme';
 import { useIsDesktop } from './hooks/useViewport';
 import { useWorkspace, type AddSourcePayload, type UseWorkspaceResult } from './hooks/useWorkspace';
-import type { PortfolioPrompt, Source } from './types';
+import type { Source } from './types';
 
 type MobileTab = 'sources' | 'chat' | 'prompts';
 
@@ -49,8 +49,6 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
   const [modalInitialTab, setModalInitialTab] = useState<AddTab>('pdf');
   const [editingSource, setEditingSource] = useState<Source | null>(null);
   const [toast, setToast] = useState('');
-  const [newPromptId, setNewPromptId] = useState<string | null>(null);
-  const [generating, setGenerating] = useState(false);
   const [pendingRenameId, setPendingRenameId] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -73,22 +71,14 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
   const pendingSource = useMemo(() => sources.find((s) => s.pending), [sources]);
   const analyzing = Boolean(pendingSource);
   const analyzingId = pendingSource?.id ?? null;
-  // Run research is allowed once the user has BOTH a source AND has
-  // sent at least one chat message (mirrors the server-side validation
-  // in startResearchRun → friendlier UX to gate at the button rather
-  // than show an error toast).
-  const hasUserMessage = useMemo(
-    () => messages.some((m) => m.role === 'user'),
-    [messages],
-  );
-  const canRunResearch = sources.length > 0 && hasUserMessage;
+  // Run research needs at least one indexed source (a seed user line is
+  // inserted server-side when the chat is still empty).
+  const canRunCouncil = sources.length > 0;
 
   // Reset transient UI state when switching research sessions.
   // `isTyping` is per-research inside `useWorkspace`, so it doesn't need
   // a manual reset here — switching just reads a different slot.
   useEffect(() => {
-    setGenerating(false);
-    setNewPromptId(null);
     setEditingSource(null);
   }, [ws.activeResearch.id]);
 
@@ -211,7 +201,7 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
           showToast('Add at least one source first');
           break;
         case 'no_user_messages':
-          showToast('Send a chat message so I have your answers');
+          showToast('Could not add a starter message for this run');
           break;
         case 'missing_ideate_key':
         case 'missing_openrouter_key':
@@ -227,23 +217,6 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
       }
     }
   }, [ws, showToast]);
-
-  const generateMore = () => {
-    setGenerating(true);
-    setTimeout(() => {
-      const stamp = Date.now().toString(36);
-      const newPrompts: PortfolioPrompt[] = [
-        { id: 'np1_' + stamp, cluster: 'Category', text: 'Activewear made from recycled ocean plastic — best-rated brands', hits: 0, intent: 'High' },
-        { id: 'np2_' + stamp, cluster: 'Category', text: 'Carbon-neutral running apparel under $100', hits: 0, intent: 'Med' },
-        { id: 'np3_' + stamp, cluster: 'Persona', text: 'Eco-conscious runners looking to switch from fast-fashion brands', hits: 0, intent: 'High' },
-      ];
-      ws.updateActiveResearch((r) => ({ ...r, prompts: [...newPrompts, ...r.prompts] }));
-      setNewPromptId(newPrompts[0]!.id);
-      setGenerating(false);
-      showToast('Added 3 sustainability prompts');
-      setTimeout(() => setNewPromptId(null), 1200);
-    }, 1600);
-  };
 
   const handleCreateProject = useCallback(() => {
     const project = ws.createProject('New project');
@@ -317,6 +290,12 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                 onRenameResearch={handleRenameActiveResearch}
                 renameOnMount={renameOnMount}
                 onRenameConsumed={clearPendingRename}
+                councilDepth={ws.activeResearch.councilDepth}
+                onCouncilDepthChange={ws.setCouncilDepth}
+                onRunResearch={runResearch}
+                onCancelResearch={cancelResearch}
+                runStatus={ws.activeResearch.runStatus}
+                canRunCouncil={canRunCouncil}
               />
             </div>
             <div className="col-card overflow-hidden flex flex-col min-h-0">
@@ -327,12 +306,6 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                 isTyping={isTyping}
                 sourcesCount={sources.length}
                 analyzing={analyzing}
-                councilDepth={ws.activeResearch.councilDepth}
-                onCouncilDepthChange={ws.setCouncilDepth}
-                onRunResearch={runResearch}
-                onCancelResearch={cancelResearch}
-                runStatus={ws.activeResearch.runStatus}
-                canRun={canRunResearch}
               />
             </div>
             <div className="col-card overflow-hidden flex flex-col min-h-0">
@@ -340,9 +313,6 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                 key={ws.activeResearch.id}
                 prompts={prompts}
                 onToast={showToast}
-                newId={newPromptId}
-                onGenerateMore={generateMore}
-                generating={generating}
                 totalChannels={ws.activeResearch.latestTotalChannels ?? 0}
                 runStatus={ws.activeResearch.runStatus}
               />
@@ -367,6 +337,12 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                   onRenameResearch={handleRenameActiveResearch}
                   renameOnMount={renameOnMount}
                   onRenameConsumed={clearPendingRename}
+                  councilDepth={ws.activeResearch.councilDepth}
+                  onCouncilDepthChange={ws.setCouncilDepth}
+                  onRunResearch={runResearch}
+                  onCancelResearch={cancelResearch}
+                  runStatus={ws.activeResearch.runStatus}
+                  canRunCouncil={canRunCouncil}
                 />
               </div>
             )}
@@ -379,12 +355,6 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                   isTyping={isTyping}
                   sourcesCount={sources.length}
                   analyzing={analyzing}
-                  councilDepth={ws.activeResearch.councilDepth}
-                  onCouncilDepthChange={ws.setCouncilDepth}
-                  onRunResearch={runResearch}
-                  onCancelResearch={cancelResearch}
-                  runStatus={ws.activeResearch.runStatus}
-                  canRun={canRunResearch}
                 />
               </div>
             )}
@@ -394,9 +364,6 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                   key={ws.activeResearch.id}
                   prompts={prompts}
                   onToast={showToast}
-                  newId={newPromptId}
-                  onGenerateMore={generateMore}
-                  generating={generating}
                   totalChannels={ws.activeResearch.latestTotalChannels ?? 0}
                   runStatus={ws.activeResearch.runStatus}
                 />
