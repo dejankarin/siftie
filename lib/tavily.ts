@@ -48,6 +48,8 @@ export interface TavilyTrackingOptions {
   posthogTraceId?: string;
   /** Free-form extras merged onto the event (e.g. { research_id, source_id }). */
   posthogProperties?: Record<string, unknown>;
+  /** PostHog group analytics — typically `{ project: <siftieProjectId> }`. */
+  posthogGroups?: Record<string, string>;
 }
 
 /**
@@ -129,6 +131,7 @@ export async function extractUrl(
     ph.capture({
       distinctId: tracking.posthogDistinctId,
       event: 'tavily_call',
+      groups: tracking.posthogGroups,
       properties: {
         endpoint: 'extract',
         latency_ms: Date.now() - start,

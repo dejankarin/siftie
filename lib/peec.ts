@@ -133,6 +133,8 @@ export interface PeecTrackingOptions {
   posthogTraceId?: string;
   /** Free-form extras merged onto the captured event. */
   posthogProperties?: Record<string, unknown>;
+  /** PostHog group analytics — typically `{ project: <siftieProjectId> }`. */
+  posthogGroups?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -388,6 +390,7 @@ async function performCall<T>(
     ph.capture({
       distinctId: tracking.posthogDistinctId,
       event: 'peec_call',
+      groups: tracking.posthogGroups,
       properties: {
         endpoint,
         method,

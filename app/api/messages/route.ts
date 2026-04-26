@@ -35,6 +35,7 @@ import { generateInterviewQuestions } from '@/lib/interview';
 import { readPosthogCaptureLlm } from '@/lib/privacy';
 import { getPostHogServer } from '@/lib/posthog';
 import { classifyProviderError } from '@/lib/provider-errors';
+import { getProjectIdForResearch } from '@/lib/workspace';
 import { z } from 'zod';
 
 export const runtime = 'nodejs';
@@ -76,6 +77,11 @@ export const POST = withUser(async ({ userId }, req) => {
 
   const ph = getPostHogServer();
   const start = Date.now();
+  // PostHog group analytics — best-effort lookup so per-workspace funnels
+  // pick up message activity. Missing project id → no group attribution
+  // (still distinct-id-attributed via posthog.group on the client).
+  const projectId = await getProjectIdForResearch(researchId);
+  const phGroups = projectId ? { project: projectId } : undefined;
 
   // Decide whether the opening interview should fire BEFORE persisting
   // the user message — once we insert, the count goes from 0 to 1 and
@@ -100,6 +106,7 @@ export const POST = withUser(async ({ userId }, req) => {
   ph.capture({
     distinctId: userId,
     event: 'message_sent',
+    groups: phGroups,
     properties: {
       role: 'user',
       research_id: researchId,
@@ -172,6 +179,7 @@ export const POST = withUser(async ({ userId }, req) => {
     ph.capture({
       distinctId: userId,
       event: 'interview_failed',
+      groups: phGroups,
       properties: {
         research_id: researchId,
         error_code: classified.code,
@@ -209,6 +217,7 @@ export const POST = withUser(async ({ userId }, req) => {
   ph.capture({
     distinctId: userId,
     event: 'interview_generated',
+    groups: phGroups,
     properties: {
       research_id: researchId,
       question_count: agentMessages.length,

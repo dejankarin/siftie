@@ -10,6 +10,7 @@
 import { withUser } from '@/lib/auth';
 import { getPostHogServer } from '@/lib/posthog';
 import { deleteSource, getSource } from '@/lib/sources';
+import { getProjectIdForResearch } from '@/lib/workspace';
 
 export const runtime = 'nodejs';
 
@@ -25,9 +26,11 @@ export const DELETE = withUser(
     await deleteSource(userId, id);
 
     const ph = getPostHogServer();
+    const projectId = await getProjectIdForResearch(source.researchId);
     ph.capture({
       distinctId: userId,
       event: 'source_removed',
+      groups: projectId ? { project: projectId } : undefined,
       properties: {
         source_id: id,
         kind: source.kind,

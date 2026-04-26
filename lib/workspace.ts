@@ -371,3 +371,22 @@ export class ForbiddenError extends Error {
     this.name = 'ForbiddenError';
   }
 }
+
+/**
+ * Look up the parent project id for a research. Used by analytics call sites
+ * that need to attach `groups: { project: projectId }` to PostHog events
+ * (group analytics — see app/PostHogIdentify.tsx for the browser side).
+ *
+ * Returns null on miss instead of throwing: analytics failures must never
+ * crash a request handler.
+ */
+export async function getProjectIdForResearch(researchId: string): Promise<string | null> {
+  const supabase = createServiceRoleSupabaseClient();
+  const { data, error } = await supabase
+    .from('researches')
+    .select('project_id')
+    .eq('id', researchId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return (data.project_id as string) ?? null;
+}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import posthog from 'posthog-js';
 import { AddSourceModal, type AddTab } from './components/AddSourceModal';
 import { ChatColumn } from './components/ChatColumn';
 import { EditSourceModal } from './components/EditSourceModal';
@@ -90,6 +91,19 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
     setNewPromptId(null);
     setEditingSource(null);
   }, [ws.activeResearch.id]);
+
+  // PostHog group analytics: attach the current Siftie project (workspace)
+  // to every subsequent browser event. Server-side ph.capture sites pass
+  // `groups: { project }` explicitly per call. Off-prod posthog.init never
+  // ran (see app/PostHogProvider.tsx), so this is a no-op on previews/dev.
+  useEffect(() => {
+    const projectId = ws.activeProject?.id;
+    if (!projectId) return;
+    if (projectId === 'p_offline') return;
+    posthog.group('project', projectId, {
+      name: ws.activeProject.name,
+    });
+  }, [ws.activeProject?.id, ws.activeProject?.name]);
 
   const openAdd = useCallback((initial?: AddTab) => {
     setModalInitialTab(initial ?? 'pdf');

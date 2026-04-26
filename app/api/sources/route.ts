@@ -29,6 +29,7 @@ import { getUserApiKey } from '@/lib/keys';
 import { flushLogs, log } from '@/lib/logger';
 import { readPosthogCaptureLlm } from '@/lib/privacy';
 import { getPostHogServer } from '@/lib/posthog';
+import { getProjectIdForResearch } from '@/lib/workspace';
 import {
   createSource,
   listSourcesForResearch,
@@ -147,6 +148,11 @@ export const POST = withUser(async ({ userId }, req) => {
   // Stable trace id so the optional Tavily call + the Gemini call show up
   // grouped under one trace in PostHog LLM Analytics.
   const traceId = `ingest_${cryptoRandom()}`;
+  // PostHog group analytics — attach this event to the parent Siftie project
+  // (workspace) so per-workspace funnels work. Lookup is best-effort: a
+  // missing projectId becomes an undefined `groups` field, not a hard error.
+  const projectId = await getProjectIdForResearch(researchId);
+  const phGroups = projectId ? { project: projectId } : undefined;
 
   log.info('source.ingest.start', {
     research_id: researchId,
@@ -177,6 +183,7 @@ export const POST = withUser(async ({ userId }, req) => {
         posthogTraceId: traceId,
         posthogPrivacyMode: privacyMode,
         posthogProperties: { research_id: researchId },
+        posthogGroups: phGroups,
       },
     );
 
@@ -192,6 +199,7 @@ export const POST = withUser(async ({ userId }, req) => {
     ph.capture({
       distinctId: userId,
       event: 'source_added',
+      groups: phGroups,
       properties: {
         kind: input.kind,
         words: result.contextDoc.words,
@@ -233,6 +241,7 @@ export const POST = withUser(async ({ userId }, req) => {
     ph.capture({
       distinctId: userId,
       event: 'source_failed',
+      groups: phGroups,
       properties: {
         kind: input.kind,
         error_code: code,

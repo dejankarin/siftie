@@ -68,7 +68,7 @@ import {
 } from './runs';
 import { listSourcesForResearch } from './sources';
 import { listMessagesForResearch } from './messages';
-import { getResearchWithContext } from './workspace';
+import { getProjectIdForResearch, getResearchWithContext } from './workspace';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -330,7 +330,13 @@ export async function runResearchPipeline(
     let peecSkipReason: string | null = null;
 
     try {
-      const peec = await fetchPeecHits(peecKey, candidates, clerkUserId, traceId);
+      const peec = await fetchPeecHits(
+        peecKey,
+        candidates,
+        clerkUserId,
+        traceId,
+        research.projectId,
+      );
       hitsByIndex = peec.hitsByIndex;
       totalChannels = peec.totalChannels;
       if (totalChannels > 0) {
@@ -421,6 +427,7 @@ export async function runResearchPipeline(
     ph.capture({
       distinctId: clerkUserId,
       event: 'research_run_complete',
+      groups: { project: research.projectId },
       properties: {
         research_id: researchId,
         run_id: runId,
@@ -451,9 +458,14 @@ export async function runResearchPipeline(
       error_code: code ?? 'unknown',
       error_message: err instanceof Error ? err.message : String(err),
     });
+    // Best-effort lookup so the failed run still attributes to its project.
+    // We can't rely on `research` from the try body — the failure may have
+    // happened before that lookup ran.
+    const failedProjectId = await getProjectIdForResearch(researchId);
     ph.capture({
       distinctId: clerkUserId,
       event: 'research_run_failed',
+      groups: failedProjectId ? { project: failedProjectId } : undefined,
       properties: {
         research_id: researchId,
         run_id: runId,
@@ -511,6 +523,7 @@ async function fetchPeecHits(
   _candidates: IdeatePrompt[],
   clerkUserId: string,
   traceId: string,
+  siftieProjectId: string,
 ): Promise<FetchPeecHitsResult> {
   if (!peecKey) throw new PeecKeyMissingError();
 
@@ -518,6 +531,10 @@ async function fetchPeecHits(
     posthogDistinctId: clerkUserId,
     posthogTraceId: traceId,
     posthogProperties: { feature: 'research', tag: 'peec_baseline' },
+    // Attach the Siftie workspace project to peec_call events so per-workspace
+    // funnels include the Peec baseline lookup. Distinct from the *Peec* API
+    // project id we pass to listBrands/listModelChannels below.
+    posthogGroups: { project: siftieProjectId },
   };
 
   const projects = await listProjects(peecKey, tracking);
@@ -569,7 +586,12 @@ async function fetchBaselineChannels(args: {
   brandId: string;
   since: Date;
   activeChannels: PeecModelChannel[];
-  tracking: { posthogDistinctId: string; posthogTraceId?: string; posthogProperties?: Record<string, unknown> };
+  tracking: {
+    posthogDistinctId: string;
+    posthogTraceId?: string;
+    posthogProperties?: Record<string, unknown>;
+    posthogGroups?: Record<string, string>;
+  };
 }): Promise<number> {
   const { apiKey, projectId, brandId, since, activeChannels, tracking } = args;
   const channelIds = activeChannels.map((c) => c.id);

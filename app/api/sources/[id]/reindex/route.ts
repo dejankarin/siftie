@@ -27,6 +27,7 @@ import { flushLogs, log } from '@/lib/logger';
 import { readPosthogCaptureLlm } from '@/lib/privacy';
 import { getPostHogServer } from '@/lib/posthog';
 import { getSource, updateSource } from '@/lib/sources';
+import { getProjectIdForResearch } from '@/lib/workspace';
 import {
   IngestError,
   runIngest,
@@ -94,6 +95,10 @@ export const POST = withUser(
     const ph = getPostHogServer();
     const start = Date.now();
     const traceId = `reindex_${id}_${Date.now().toString(36)}`;
+    // PostHog group analytics — best-effort lookup so reindex events show
+    // under the parent workspace funnel.
+    const projectId = await getProjectIdForResearch(source.researchId);
+    const phGroups = projectId ? { project: projectId } : undefined;
 
     log.info('source.reindex.start', {
       research_id: source.researchId,
@@ -126,6 +131,7 @@ export const POST = withUser(
             source_id: id,
             reindex: true,
           },
+          posthogGroups: phGroups,
         },
       );
 
@@ -139,6 +145,7 @@ export const POST = withUser(
       ph.capture({
         distinctId: userId,
         event: 'source_reindexed',
+        groups: phGroups,
         properties: {
           kind: source.kind,
           words: result.contextDoc.words,
@@ -188,6 +195,7 @@ export const POST = withUser(
       ph.capture({
         distinctId: userId,
         event: 'source_failed',
+        groups: phGroups,
         properties: {
           kind: source.kind,
           error_code: code,

@@ -106,6 +106,8 @@ export interface IngestRunOptions {
   posthogPrivacyMode: boolean;
   /** Extra event properties; we automatically add `kind`. */
   posthogProperties?: Record<string, unknown>;
+  /** PostHog group analytics — typically `{ project: <siftieProjectId> }`. */
+  posthogGroups?: Record<string, string>;
 }
 
 export class IngestError extends Error {
@@ -391,6 +393,7 @@ async function ingestUrl(
     const result = await extractUrl(keys.tavilyKey!, input.url, {
       posthogDistinctId: opts.posthogDistinctId,
       posthogTraceId: opts.posthogTraceId,
+      posthogGroups: opts.posthogGroups,
       posthogProperties: {
         ...opts.posthogProperties,
         host,
