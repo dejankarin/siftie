@@ -364,6 +364,44 @@ async function assertResearchOwner(clerkUserId: string, researchId: string): Pro
   if (!data) throw new ForbiddenError('Research not found or not owned by this user');
 }
 
+/**
+ * Boolean ownership check used by the `/app/[projectId]/[researchId]`
+ * server route. Returns `true` only when the research belongs to the
+ * given project AND the project belongs to the user. Differs from
+ * `assertResearchOwner` in three ways:
+ *   1. Verifies the project ⇄ research relationship (so a stale URL
+ *      that points at a research the user *does* own but under a
+ *      different project still falls back to /app rather than silently
+ *      switching their visible project).
+ *   2. Returns a boolean so the route can call `redirect('/app')`
+ *      without try/catching a thrown ForbiddenError.
+ *   3. Validates id shape first; the page exposes the ids in the URL,
+ *      so we want to short-circuit before issuing a DB query for
+ *      obvious garbage like a manually typed "abc/def".
+ */
+export async function userOwnsProjectAndResearch(
+  clerkUserId: string,
+  projectId: string,
+  researchId: string,
+): Promise<boolean> {
+  if (!UUID_RE.test(projectId) || !UUID_RE.test(researchId)) return false;
+  const supabase = createServiceRoleSupabaseClient();
+  const { data, error } = await supabase
+    .from('researches')
+    .select('id, projects!inner(id, clerk_user_id)')
+    .eq('id', researchId)
+    .eq('project_id', projectId)
+    .eq('projects.clerk_user_id', clerkUserId)
+    .maybeSingle();
+  if (error) {
+    console.warn('[userOwnsProjectAndResearch] query error:', error.message);
+    return false;
+  }
+  return Boolean(data);
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export class ForbiddenError extends Error {
   status = 403;
   constructor(message = 'Forbidden') {

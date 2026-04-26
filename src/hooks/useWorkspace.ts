@@ -223,6 +223,44 @@ function writeActiveIds(ids: ActiveIds) {
 }
 
 /**
+ * Shape of the raw `public.sources` row that arrives over a Realtime
+ * `postgres_changes` payload (snake_case, exactly as Postgres stores it).
+ * The bootstrap fetch goes through /api/workspace which already converts
+ * to camelCase, but Realtime hands us the row verbatim.
+ */
+interface DbSourceRow {
+  id: string;
+  research_id: string;
+  kind: 'pdf' | 'url' | 'doc' | 'md';
+  title: string;
+  meta: ApiSourceMeta;
+  snippet: string | null;
+  context_doc: ContextDoc | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Convert a raw DB sources row (from a Realtime `postgres_changes`
+ * payload) into the client-side Source shape used by the UI. Mirrors
+ * the bootstrap path (`apiSourceToClient`) but starts from snake_case
+ * and ISO timestamps.
+ */
+function dbSourceRowToClient(row: DbSourceRow): Source {
+  return apiSourceToClient({
+    id: row.id,
+    researchId: row.research_id,
+    kind: row.kind,
+    title: row.title,
+    meta: row.meta ?? {},
+    snippet: row.snippet ?? '',
+    contextDoc: (row.context_doc ?? {}) as ContextDoc,
+    createdAt: new Date(row.created_at).getTime(),
+    updatedAt: new Date(row.updated_at).getTime(),
+  });
+}
+
+/**
  * Map the server's Source row into the client-side Source shape.
  *   - server `kind` → client `type` (the existing UI prop name).
  *   - server's structured `meta` JSONB → human-readable subtitle string.
@@ -325,7 +363,10 @@ function formatMessageTime(ts: number): string {
  * shape (kind→type, structured meta→display string, full ContextDoc
  * preserved). Messages and prompts stay empty/intro until Sessions 4+5.
  */
-function hydrate(api: ApiWorkspaceResponse): WorkspaceState {
+function hydrate(
+  api: ApiWorkspaceResponse,
+  initial?: { projectId?: string; researchId?: string },
+): WorkspaceState {
   const projects: Project[] = api.projects.map((p) => ({
     id: p.id,
     name: p.name,
@@ -378,27 +419,58 @@ function hydrate(api: ApiWorkspaceResponse): WorkspaceState {
     };
   });
 
-  const stored = readActiveIds();
+  // Resolution priority for the initial active pair:
+  //   1. URL-provided ids (server already validated ownership in the
+  //      `/app/[projectId]/[researchId]` route — we just need to verify
+  //      they actually exist in the hydrated workspace, in case the
+  //      research/project was deleted between the server render and
+  //      the client fetch).
+  //   2. localStorage selection from a previous session.
+  //   3. First project + its first research (fresh login).
   let activeProjectId = projects[0]?.id ?? '';
   let activeResearchId = researches[0]?.id ?? '';
-  if (stored) {
-    const proj = projects.find((p) => p.id === stored.projectId);
-    if (proj) {
-      activeProjectId = proj.id;
-      const matchingResearch = researches.find(
-        (r) => r.id === stored.researchId && r.projectId === proj.id,
-      );
-      if (matchingResearch) {
-        activeResearchId = matchingResearch.id;
-      } else {
-        activeResearchId = researches.find((r) => r.projectId === proj.id)?.id ?? activeResearchId;
-      }
+  const candidates: Array<{ projectId?: string; researchId?: string }> = [];
+  if (initial?.projectId && initial.researchId) {
+    candidates.push({ projectId: initial.projectId, researchId: initial.researchId });
+  }
+  const stored = readActiveIds();
+  if (stored) candidates.push(stored);
+  for (const candidate of candidates) {
+    const proj = projects.find((p) => p.id === candidate.projectId);
+    if (!proj) continue;
+    activeProjectId = proj.id;
+    const matchingResearch = researches.find(
+      (r) => r.id === candidate.researchId && r.projectId === proj.id,
+    );
+    if (matchingResearch) {
+      activeResearchId = matchingResearch.id;
+    } else {
+      activeResearchId = researches.find((r) => r.projectId === proj.id)?.id ?? activeResearchId;
     }
+    break;
   }
   return { projects, researches, activeProjectId, activeResearchId };
 }
 
-export function useWorkspace(): UseWorkspaceResult | null {
+export interface UseWorkspaceOptions {
+  /**
+   * Initial active project id, sourced from `/app/<projectId>/<researchId>`.
+   * Only honoured if both ids are provided AND the workspace fetch
+   * confirms they exist; otherwise we fall back to localStorage.
+   */
+  initialProjectId?: string;
+  initialResearchId?: string;
+}
+
+export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult | null {
+  const { initialProjectId, initialResearchId } = opts;
+  // Capture the URL-provided ids exactly once — re-renders with the same
+  // strings shouldn't retrigger the bootstrap fetch, and a parent that
+  // memoises `opts` is not guaranteed.
+  const initialIdsRef = useRef<{ projectId?: string; researchId?: string }>({
+    projectId: initialProjectId,
+    researchId: initialResearchId,
+  });
   const [state, setState] = useState<WorkspaceState | null>(null);
   // Keep a ref of the latest state so async mutators can compute rollbacks
   // without stale closures pinning the React state at hook-creation time.
@@ -418,6 +490,12 @@ export function useWorkspace(): UseWorkspaceResult | null {
   // response. A Set is fine — message ids are UUIDs, and the chat
   // history is bounded by what one user can read.
   const seenMessageIdsRef = useRef<Set<string>>(new Set());
+  // Same idea for sources — the Realtime INSERT for a brand-new source
+  // races the POST /api/sources response, and we don't want both to
+  // append the row. Removed sources stay in the set; if the user
+  // re-uploads the same blob the server hands back a fresh uuid, so
+  // there's no ABA collision.
+  const seenSourceIdsRef = useRef<Set<string>>(new Set());
 
   // Clerk session is required to mint Supabase JWTs for the Realtime
   // channel. The client is recreated whenever the session reference
@@ -439,7 +517,7 @@ export function useWorkspace(): UseWorkspaceResult | null {
         if (!res.ok) throw new Error(`GET /api/workspace failed (${res.status})`);
         const api = (await res.json()) as ApiWorkspaceResponse;
         if (cancelled) return;
-        setState(hydrate(api));
+        setState(hydrate(api, initialIdsRef.current));
       } catch (err) {
         console.error('[useWorkspace] initial load failed:', err);
         // Fall back to a minimal in-memory workspace so the UI doesn't get
@@ -477,22 +555,33 @@ export function useWorkspace(): UseWorkspaceResult | null {
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (!state) return;
-    const seen = seenMessageIdsRef.current;
+    const seenMessages = seenMessageIdsRef.current;
+    const seenSources = seenSourceIdsRef.current;
     for (const r of state.researches) {
-      for (const m of r.messages) seen.add(m.id);
+      for (const m of r.messages) seenMessages.add(m.id);
+      for (const s of r.sources) {
+        // Skip optimistic placeholders — we deliberately want the
+        // Realtime INSERT to repopulate them when the server commits.
+        if (!s.id.startsWith('s_tmp_')) seenSources.add(s.id);
+      }
     }
   }, [state]);
 
   // -------------------------------------------------------------------------
-  // Realtime subscription — listen for `INSERT` events on the messages
-  // table for any research the user owns (RLS handles the filtering)
-  // and append new rows to the right research. Skips rows whose id is
-  // already in `seenMessageIdsRef`, which catches the common case where
-  // the POST response added the row first.
+  // Realtime subscription — single multiplexed channel covering three
+  // tables, all filtered by RLS to rows the user owns:
   //
-  // Also listens for INSERT/UPDATE on the `runs` table so the Prompts
-  // column reflects status flips (`running` → `complete`/`failed`) and
-  // the persisted prompts portfolio without a page reload.
+  //   • `messages` (INSERT) — new chat lines, dedupes against ids
+  //     already inserted by a POST response via `seenMessageIdsRef`.
+  //
+  //   • `runs` (INSERT/UPDATE) — propagates run status flips
+  //     (`running` → `complete`/`failed`) and the persisted prompts
+  //     portfolio so the Prompts column updates without a reload.
+  //
+  //   • `sources` (INSERT/UPDATE/DELETE) — keeps the Sources column in
+  //     sync across multiple tabs and reflects asynchronous server
+  //     mutations (e.g. re-index updating `context_doc`/`snippet`).
+  //     Insert dedupe via `seenSourceIdsRef` mirrors the messages flow.
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (!supabase) return;
@@ -600,6 +689,75 @@ export function useWorkspace(): UseWorkspaceResult | null {
                 return next;
               });
             }
+          },
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'sources' },
+          (payload) => {
+            // RLS filters this stream to sources whose parent research
+            // belongs to the user, so we don't have to verify ownership
+            // here. Three flavours: INSERT (another tab uploaded a
+            // source, or the local POST round-trip is racing us),
+            // UPDATE (re-index swapped contextDoc/snippet/title), and
+            // DELETE (sibling tab removed a row).
+            const event = payload.eventType;
+            if (event === 'DELETE') {
+              const oldRow = payload.old as { id?: string; research_id?: string } | undefined;
+              const id = oldRow?.id;
+              if (!id) return;
+              seenSourceIdsRef.current.delete(id);
+              setState((s) => {
+                if (!s) return s;
+                let mutated = false;
+                const next = s.researches.map((r) => {
+                  if (!r.sources.some((src) => src.id === id)) return r;
+                  mutated = true;
+                  return { ...r, sources: r.sources.filter((src) => src.id !== id) };
+                });
+                return mutated ? { ...s, researches: next } : s;
+              });
+              return;
+            }
+            const newRow = payload.new as DbSourceRow | undefined;
+            if (!newRow?.id) return;
+            const client = dbSourceRowToClient(newRow);
+            if (event === 'INSERT') {
+              if (seenSourceIdsRef.current.has(newRow.id)) return;
+              seenSourceIdsRef.current.add(newRow.id);
+              setState((s) => {
+                if (!s) return s;
+                return {
+                  ...s,
+                  researches: s.researches.map((r) => {
+                    if (r.id !== newRow.research_id) return r;
+                    // Defensive: if a stale optimistic row with the same
+                    // id somehow lingered (it shouldn't — addSource
+                    // swaps it to the real id), drop it before prepending.
+                    const filtered = r.sources.filter((src) => src.id !== client.id);
+                    return { ...r, sources: [client, ...filtered] };
+                  }),
+                };
+              });
+              return;
+            }
+            // UPDATE — re-index, rename, or any future field tweak.
+            // Preserves the row's position in the list rather than
+            // moving it to the top.
+            seenSourceIdsRef.current.add(newRow.id);
+            setState((s) => {
+              if (!s) return s;
+              return {
+                ...s,
+                researches: s.researches.map((r) => {
+                  if (r.id !== newRow.research_id) return r;
+                  return {
+                    ...r,
+                    sources: r.sources.map((src) => (src.id === client.id ? client : src)),
+                  };
+                }),
+              };
+            });
           },
         )
         .subscribe();
@@ -970,6 +1128,10 @@ export function useWorkspace(): UseWorkspaceResult | null {
     try {
       const persisted = await postSource(targetResearchId, payload);
       const client = apiSourceToClient(persisted);
+      // Mark the real id as seen *before* mutating state so a Realtime
+      // INSERT for the same row that arrives during the swap is treated
+      // as a duplicate and dropped on the floor.
+      seenSourceIdsRef.current.add(client.id);
       setState((s) =>
         s
           ? {

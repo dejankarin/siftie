@@ -1,5 +1,6 @@
 'use client';
 
+import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import posthog from 'posthog-js';
 import { AddSourceModal, type AddTab } from './components/AddSourceModal';
@@ -17,6 +18,16 @@ import { useIsDesktop } from './hooks/useViewport';
 import { useWorkspace, type AddSourcePayload, type UseWorkspaceResult } from './hooks/useWorkspace';
 import type { Source } from './types';
 
+interface AppProps {
+  /**
+   * Set when the user enters via `/app/<projectId>/<researchId>`. The
+   * server route has already validated ownership; we forward to
+   * `useWorkspace` so the initial paint lands on the deep-linked pair.
+   */
+  initialProjectId?: string;
+  initialResearchId?: string;
+}
+
 type MobileTab = 'sources' | 'chat' | 'prompts';
 
 /**
@@ -25,8 +36,8 @@ type MobileTab = 'sources' | 'chat' | 'prompts';
  * as a prop so AppContent's internal hooks can assume non-null data and
  * stay rules-of-hooks-compliant.
  */
-export default function App() {
-  const ws = useWorkspace();
+export default function App({ initialProjectId, initialResearchId }: AppProps = {}) {
+  const ws = useWorkspace({ initialProjectId, initialResearchId });
   if (!ws) {
     // CSS variables (--bg, --ink-2) cascade from the data-theme attribute
     // set on <html> by the bootstrap script in app/layout.tsx, so the
@@ -43,6 +54,17 @@ export default function App() {
 function AppContent({ ws }: { ws: UseWorkspaceResult }) {
   const isDesktop = useIsDesktop();
   const { theme, toggle: toggleTheme } = useTheme();
+  const router = useRouter();
+  const pathname = usePathname();
+  // True until we've performed the very first URL alignment after the
+  // workspace finishes hydrating. The first sync uses `replace` so the
+  // user can still hit the browser back button to escape /app entirely;
+  // subsequent project/research switches use `push` so back returns to
+  // the previous research.
+  const initialUrlSyncRef = useRef(true);
+  // Tracks the path the URL effect last reconciled to, so a back/forward
+  // navigation can be distinguished from our own router.push echo.
+  const lastSyncedPathRef = useRef<string | null>(null);
 
   const [tab, setTab] = useState<MobileTab>('chat');
   const [modalOpen, setModalOpen] = useState(false);
@@ -96,6 +118,77 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
       name: ws.activeProject.name,
     });
   }, [ws.activeProject?.id, ws.activeProject?.name]);
+
+  // ---------------------------------------------------------------------
+  // URL ⇄ active-pair sync (bidirectional).
+  //
+  // Persists the current project/research as a deep-linkable
+  // `/app/<projectId>/<researchId>` URL so:
+  //   • Sharing a link lands the recipient on the same research (the
+  //     server route validates ownership and falls back to /app on a
+  //     mismatch — no information leak).
+  //   • The browser back/forward buttons walk through recent research
+  //     switches naturally — when the URL changes externally we adopt
+  //     it into workspace state instead of pushing back to where we were.
+  //   • Hard refresh restores the same view without depending on
+  //     localStorage.
+  //
+  // Skips temp/optimistic ids and the offline fallback so the URL never
+  // contains `r_tmp_xxx` / `p_offline` — those reconcile to real UUIDs
+  // within a network round-trip and the effect re-runs to push the
+  // canonical URL.
+  // ---------------------------------------------------------------------
+  const activeProjectId = ws.activeProject?.id;
+  const activeResearchId = ws.activeResearch?.id;
+  useEffect(() => {
+    if (!activeProjectId || !activeResearchId) return;
+    if (
+      activeProjectId === 'p_offline' ||
+      activeProjectId.startsWith('p_tmp_') ||
+      activeResearchId.startsWith('r_tmp_')
+    ) {
+      return;
+    }
+    const desired = `/app/${activeProjectId}/${activeResearchId}`;
+
+    // URL → state: pathname diverged from the last value we ourselves
+    // pushed AND from the current state — that means the browser
+    // navigated us (back/forward, hash, deep link) and we should adopt
+    // it. We only adopt when the URL points at a research/project pair
+    // that actually exists locally; otherwise the server route would
+    // already have redirected, and we leave state alone so the
+    // state→URL branch below pushes the canonical pair.
+    if (pathname !== desired && pathname !== lastSyncedPathRef.current) {
+      const match = pathname.match(/^\/app\/([^/]+)\/([^/]+)$/);
+      if (match) {
+        const urlPid = match[1];
+        const urlRid = match[2];
+        const exists = ws.state.researches.some(
+          (r) => r.id === urlRid && r.projectId === urlPid,
+        );
+        if (exists && urlRid !== activeResearchId) {
+          ws.setActiveResearch(urlRid);
+          lastSyncedPathRef.current = pathname;
+          initialUrlSyncRef.current = false;
+          return;
+        }
+      }
+    }
+
+    // State → URL.
+    if (pathname === desired) {
+      lastSyncedPathRef.current = desired;
+      initialUrlSyncRef.current = false;
+      return;
+    }
+    lastSyncedPathRef.current = desired;
+    if (initialUrlSyncRef.current) {
+      initialUrlSyncRef.current = false;
+      router.replace(desired);
+    } else {
+      router.push(desired);
+    }
+  }, [activeProjectId, activeResearchId, pathname, router, ws]);
 
   const openAdd = useCallback((initial?: AddTab) => {
     setModalInitialTab(initial ?? 'pdf');

@@ -8,7 +8,7 @@ A three-column research workspace (Sources / Chat / Prompts) that turns brand so
 
 ## Status
 
-Built and deployed in 48-hour sprints, tracked as nine "sessions". As of **commit `861596c`**:
+Built and deployed in 48-hour sprints, tracked as nine "sessions". As of **commit `b375909`** plus follow-ups:
 
 | Session | What | Status |
 |---|---|---|
@@ -19,6 +19,9 @@ Built and deployed in 48-hour sprints, tracked as nine "sessions". As of **commi
 | 4 | Live chat + Gemini-generated interview questions | Shipped |
 | 5 | Peec REST wrappers + shared resilience layer + offline banner | Shipped |
 | 6 | Research orchestrator (Ideate → [Peec] → Council → Surface) + chat narration | Shipped |
+| 6.5 | Stoppable research runs (soft cancellation via `runs.status`) | Shipped |
+| 6.6 | Three-column IA polish (Sources / Chat / Output) + Markdown report download | Shipped |
+| —   | Deep-link routing `/app/[projectId]/[researchId]` + `sources` Realtime sync | Shipped |
 | 7 | Prompts column live (dynamic HitsBar, Show-all drawer, CSV export) | Pending |
 | 8 | Reply router (Tavily web search) + landing polish + mobile pass | Pending |
 | 9 | Demo prep + PostHog dashboard + 2 evals + 1 cluster view + final README | Pending |
@@ -26,6 +29,10 @@ Built and deployed in 48-hour sprints, tracked as nine "sessions". As of **commi
 Beyond the original plan, the following also shipped:
 
 - **OpenAI Platform direct** as the Ideate primary (GPT-5.4) with Gemini Pro fallback, plus an OpenAI fallback for source ingestion when Gemini Flash is unavailable. Independent of OpenRouter so users can use their existing OpenAI billing.
+- **Stoppable research runs (Session 6.5)** — soft cancellation via `runs.status='cancelling'` polled by the orchestrator between stages; the chat narrates the stop and the prompts column reflects it without a reload.
+- **Markdown report download (Session 6.6)** — `GET /api/research/[runId]/report` streams a comprehensive Markdown export (TL;DR via Gemini Flash, run metadata, sources table, prompt portfolio with per-prompt Chair rationales, full Council transcript) wired to the **Download report** button at the bottom of the prompts column.
+- **Deep-link routing** — `/app/[projectId]/[researchId]` server route validates ownership in one query and falls back to `redirect('/app')` on mismatch (no information leak). The client keeps URL ⇄ active-pair in sync bidirectionally so the browser back button walks recent research switches naturally.
+- **`sources` Realtime sync** — third `postgres_changes` handler (alongside `messages` and `runs`) on the same Supabase channel keeps the sources column consistent across multiple tabs of the same workspace, with insert/update/delete coverage and dedupe against the local optimistic-swap path.
 - **PostHog Logs** via OpenTelemetry / OTLP HTTP — every server log line ships to PostHog Cloud EU as structured events keyed by Clerk user id and run id (production only).
 - **PostHog feature flags** server-resolved and bootstrapped to the browser on every render so flag values match what the server saw — no flicker.
 - **PostHog group analytics** so events are also attributed to the active Siftie project.
@@ -99,13 +106,15 @@ Other scripts:
        │          │           │ Realtime)│           │  cloud)  │
        └──────────┘           └──────────┘           └──────────┘
 
-  /api/sources    → Tavily Extract / mammoth / inline PDF → Gemini Flash → ContextDoc → Supabase
-  /api/messages   → Gemini Flash interview Q's (first six) / chat passthrough        → Supabase
-  /api/research   → Ideate (GPT-5.4 → Gemini Pro fallback)
-                    → [Peec baseline if key]
-                    → Council (4 OpenRouter models, 3 stages, anonymised)
-                    → Chair synthesis
-                    → runs row + chat bubbles via Realtime
+  /api/sources              → Tavily Extract / mammoth / inline PDF → Gemini Flash → ContextDoc → Supabase
+  /api/messages             → Gemini Flash interview Q's (first six) / chat passthrough        → Supabase
+  /api/research             → Ideate (GPT-5.4 → Gemini Pro fallback)
+                              → [Peec baseline if key]
+                              → Council (4 OpenRouter models, 3 stages, anonymised)
+                              → Chair synthesis
+                              → runs row + chat bubbles via Realtime
+  /api/research/cancel      → flip status='cancelling'; orchestrator polls between stages
+  /api/research/[id]/report → Gemini Flash TL;DR + Markdown export (sources, prompts, transcript)
 ```
 
 ## Project layout
@@ -114,12 +123,13 @@ Other scripts:
 app/
   layout.tsx                  Root HTML, fonts, anti-FOUC theme, ClerkProvider, PostHogProvider, PostHogIdentify
   page.tsx                    Landing page (signed-in users redirect to /app)
-  AppShell.tsx                Dynamic-imported workspace shell (ssr: false)
+  AppShell.tsx                Dynamic-imported workspace shell (ssr: false). Accepts optional initialProjectId / initialResearchId for deep-link entry.
   globals.css                 Design tokens + light/dark theme
   error.tsx, global-error.tsx Client + root error boundaries (PostHog Error Tracking)
   icon.svg                    Favicon (dark Siftie mark, #041923 background)
   app/
-    page.tsx                  Server component — requires auth, gates on 3 required keys
+    page.tsx                                     Server component — requires auth, gates on 3 required keys
+    [projectId]/[researchId]/page.tsx            Deep-link entry — validates ownership of the pair, falls back to /app on mismatch
   settings/
     layout.tsx                SettingsTopBar + SettingsSidebar
     api-keys/page.tsx + ApiKeysForm.tsx
@@ -136,6 +146,8 @@ app/
     sources/route.ts + [id]/route.ts + [id]/reindex/route.ts
     messages/route.ts         POST user reply (also generates first-six interview questions)
     research/route.ts         POST start a research run (returns 202, work runs in waitUntil)
+    research/cancel/route.ts  POST flip a running run to status='cancelling' (orchestrator polls between stages)
+    research/[runId]/report/route.ts  GET stream a Markdown report for a completed run
 lib/
   auth.ts                     requireUser() — Clerk auth + lazy user_profiles upsert
   council.ts                  3-stage Council (independent review → cross review → Chair)
@@ -155,20 +167,21 @@ lib/
   posthog.ts                  Server PostHog singleton + getPostHogServer()
   privacy.ts                  Reads user_profiles.posthog_capture_llm
   provider-errors.ts          Normalises raw SDK errors into stable user-facing codes
+  report.ts                   Markdown report builder (Gemini Flash TL;DR + run metadata + sources + prompts + transcript)
   research/schema.ts          Zod schemas for IdeatePrompt, ReviewerVerdict, ChairPick, FinalPrompt
-  research.ts                 Top-level orchestrator (Ideate → Peec → Council → Surface)
+  research.ts                 Top-level orchestrator (Ideate → Peec → Council → Surface), polls for soft cancellation
   resilience.ts               Shared withResilience helper (timeouts, retries, abort rules)
-  runs.ts                     Run lifecycle (createRun, completeRun, failRun, getLatestRunByResearch)
+  runs.ts                     Run lifecycle (createRun, completeRun, failRun, getLatestRunByResearch, getRunForOwner, requestRunCancel)
   sources.ts                  Source persistence + listing
   supabase/                   Supabase clients (server with Clerk JWT; browser with public anon)
   tavily.ts                   Tavily wrapper (extract, search)
-  workspace.ts                Project + research CRUD against Supabase
+  workspace.ts                Project + research CRUD against Supabase, plus userOwnsProjectAndResearch() ownership check used by the deep-link route
 src/
-  App.tsx                     Three-column desktop + mobile-tab layout
+  App.tsx                     Three-column desktop + mobile-tab layout. Bidirectional URL ⇄ active-pair sync (push on UI switch, adopt URL on back/forward).
   components/                 TopBar, MobileTopBar, MobileTabBar, SourcesColumn, ChatColumn,
-                              PromptsColumn, ResearchNav, AddSourceModal, EditSourceModal,
-                              ThemeToggle, Toast
-  hooks/                      useTheme, useViewport, useWorkspace
+                              PromptsColumn, ResearchNav, RunResearchButton, AddSourceModal,
+                              EditSourceModal, ThemeToggle, Toast
+  hooks/                      useTheme, useViewport, useWorkspace (accepts initialProjectId/initialResearchId; subscribes to messages/runs/sources Realtime)
   data/                       mock + workspace seed factories
   types.ts                    Shared types
 supabase/migrations/
