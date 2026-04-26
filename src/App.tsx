@@ -293,14 +293,14 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
   const renameOnMount = pendingRenameId === ws.activeResearch.id;
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-screen flex flex-col overflow-hidden">
       <TopBar theme={theme} onToggleTheme={toggleTheme} />
       <MobileTopBar tab={tab} theme={theme} onToggleTheme={toggleTheme} />
 
       {isDesktop ? (
-        <main className="flex-1 px-4 lg:px-6 py-4 lg:py-5">
+        <main className="flex-1 min-h-0 px-4 lg:px-6 py-4 lg:py-5">
           <div
-            className="grid h-[calc(100vh-72px)] gap-4 lg:gap-5"
+            className="grid h-full min-h-0 gap-4 lg:gap-5"
             style={{ gridTemplateColumns: 'minmax(260px, 320px) minmax(380px, 1fr) minmax(280px, 360px)' }}
           >
             <div className="col-card overflow-hidden flex flex-col min-h-0">
