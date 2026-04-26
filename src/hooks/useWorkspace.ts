@@ -173,11 +173,6 @@ export interface UseWorkspaceResult {
    */
   sendMessage: (text: string) => Promise<void>;
   /**
-   * Update the Council depth on the active research. Optimistic +
-   * server-confirmed via PATCH /api/researches/{id}.
-   */
-  setCouncilDepth: (depth: CouncilDepth) => void;
-  /**
    * Kick off a research run for the active research. Resolves once
    * the server has accepted the request (HTTP 202). Throws on
    * validation / server errors with `code` set to a stable short
@@ -1424,34 +1419,14 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
   }, []);
 
   // -------------------------------------------------------------------------
-  // Research mutators (Session 6) — Council depth + run research.
+  // Research mutators (Session 6) — run / cancel research.
+  //
+  // Note: Council depth is no longer user-mutable from the UI (Session 6.6
+  // removed the composer dropdown). New runs default to Standard depth at
+  // run time (`startResearchRun` in `lib/research.ts`). Operators can flip
+  // to Quick via the PostHog `council_depth_override` feature flag, with
+  // no DB write.
   // -------------------------------------------------------------------------
-
-  /**
-   * Update the composer's "Council depth" dropdown for the active
-   * research. Optimistic: flips local state immediately, fires the
-   * PATCH in the background. On failure we just log — next reload
-   * pulls the truth from Supabase, so transient failures self-heal.
-   */
-  const setCouncilDepth = useCallback((depth: CouncilDepth) => {
-    const targetId = stateRef.current?.activeResearchId;
-    if (!targetId) return;
-    setState((s) =>
-      s
-        ? {
-            ...s,
-            researches: s.researches.map((r) =>
-              r.id === targetId ? { ...r, councilDepth: depth } : r,
-            ),
-          }
-        : s,
-    );
-    void fetch(`/api/researches/${targetId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ councilDepth: depth }),
-    }).catch((err) => console.error('[useWorkspace] setCouncilDepth failed:', err));
-  }, []);
 
   /**
    * Trigger a research run for the active research. POSTs
@@ -1599,7 +1574,6 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
     removeSource,
     reindexSource,
     sendMessage,
-    setCouncilDepth,
     runResearch,
     cancelResearch,
     isTyping: pendingMessageResearchIds.has(state.activeResearchId),

@@ -266,25 +266,6 @@ export async function createResearch(
 }
 
 /**
- * Update the council depth on a research. Idempotent — setting to the
- * same value is a no-op (Postgres returns 0 affected rows but no
- * error). Verifies ownership before writing.
- */
-export async function setResearchCouncilDepth(
-  clerkUserId: string,
-  researchId: string,
-  depth: CouncilDepth,
-): Promise<void> {
-  await assertResearchOwner(clerkUserId, researchId);
-  const supabase = createServiceRoleSupabaseClient();
-  const { error } = await supabase
-    .from('researches')
-    .update({ council_depth: depth })
-    .eq('id', researchId);
-  if (error) throw error;
-}
-
-/**
  * Read a research row + its parent project name, used by the research
  * orchestrator to know what to title things. Verifies ownership.
  */
