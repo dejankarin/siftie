@@ -60,10 +60,20 @@ export const POST = withUser(
       );
     }
 
-    const geminiKey = await getUserApiKey(userId, 'gemini');
-    if (!geminiKey) {
+    // Same BYOK rules as POST /api/sources: either Gemini (preferred)
+    // or OpenAI is acceptable; we only block when both are missing.
+    const [geminiKey, openaiKey] = await Promise.all([
+      getUserApiKey(userId, 'gemini'),
+      getUserApiKey(userId, 'openai'),
+    ]);
+    if (!geminiKey && !openaiKey) {
       return Response.json(
-        { error: 'missing_key', provider: 'gemini' },
+        {
+          error: 'missing_key',
+          provider: 'gemini',
+          message:
+            'Add a Gemini key (preferred) or OpenAI key in Settings before re-indexing.',
+        },
         { status: 400 },
       );
     }
@@ -86,7 +96,11 @@ export const POST = withUser(
     try {
       const result = await runIngest(
         input,
-        { geminiKey, tavilyKey: tavilyKey ?? undefined },
+        {
+          geminiKey: geminiKey ?? undefined,
+          openaiKey: openaiKey ?? undefined,
+          tavilyKey: tavilyKey ?? undefined,
+        },
         {
           posthogDistinctId: userId,
           posthogTraceId: traceId,

@@ -110,11 +110,21 @@ export const POST = withUser(async ({ userId }, req) => {
     );
   }
 
-  // Resolve BYOK keys per-request (never cached, never env).
-  const geminiKey = await getUserApiKey(userId, 'gemini');
-  if (!geminiKey) {
+  // Resolve BYOK keys per-request (never cached, never env). Source
+  // ingestion can run on either Gemini Flash (preferred) or OpenAI
+  // GPT-5.4 (fallback) — we just need at least one of them.
+  const [geminiKey, openaiKey] = await Promise.all([
+    getUserApiKey(userId, 'gemini'),
+    getUserApiKey(userId, 'openai'),
+  ]);
+  if (!geminiKey && !openaiKey) {
     return Response.json(
-      { error: 'missing_key', provider: 'gemini' },
+      {
+        error: 'missing_key',
+        provider: 'gemini',
+        message:
+          'Add a Gemini key (preferred) or OpenAI key in Settings before adding sources.',
+      },
       { status: 400 },
     );
   }
@@ -139,7 +149,11 @@ export const POST = withUser(async ({ userId }, req) => {
   try {
     const result = await runIngest(
       input,
-      { geminiKey, tavilyKey: tavilyKey ?? undefined },
+      {
+        geminiKey: geminiKey ?? undefined,
+        openaiKey: openaiKey ?? undefined,
+        tavilyKey: tavilyKey ?? undefined,
+      },
       {
         posthogDistinctId: userId,
         posthogTraceId: traceId,

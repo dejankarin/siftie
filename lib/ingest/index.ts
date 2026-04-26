@@ -19,6 +19,10 @@
 import 'server-only';
 import { contextDoc, type ContextDocCallOptions } from '../gemini';
 import { parseDocx } from '../docx';
+import {
+  openAIContextDoc,
+  type OpenAIIngestInput,
+} from '../openai';
 import { extractUrl, TavilyExtractError } from '../tavily';
 import { classifyProviderError, type ProviderErrorCode, type ProviderName } from '../provider-errors';
 import type { ContextDoc } from './schema';
@@ -73,8 +77,19 @@ export interface IngestResult {
   snippet: string;
 }
 
+/**
+ * BYOK keys passed into the ingest pipeline. **At least one of**
+ * `geminiKey` or `openaiKey` must be present — Gemini Flash is the
+ * primary indexer, OpenAI GPT-5.4 is the fallback.
+ *
+ * `tavilyKey` is only consulted for `kind: 'url'` (the URL extractor
+ * has no LLM fallback — Tavily / direct fetch is the only path).
+ */
 export interface IngestKeys {
-  geminiKey: string;
+  /** Primary: Gemini Flash. Cheap and natively parses PDFs. */
+  geminiKey?: string;
+  /** Fallback: OpenAI GPT-5.4 — used when Gemini is unavailable. */
+  openaiKey?: string;
   /** Required only for `kind: 'url'`. */
   tavilyKey?: string;
 }
@@ -114,17 +129,26 @@ export class IngestError extends Error {
 /**
  * Run the full ingest pipeline for a single source. Throws `IngestError`
  * with a stable `code` on any failure.
+ *
+ * Provider strategy: tries **Gemini Flash** first (cheap, native PDF
+ * parsing). On failure, falls back to **OpenAI GPT-5.4** (also native
+ * PDF support via inline base64 file content parts). Either key on
+ * its own is enough to start an ingest; we only block when both are
+ * missing.
  */
 export async function runIngest(
   input: IngestInput,
   keys: IngestKeys,
   opts: IngestRunOptions,
 ): Promise<IngestResult> {
-  if (!keys.geminiKey) {
-    throw new IngestError('Gemini API key required for ingest', 'missing_key');
+  if (!keys.geminiKey && !keys.openaiKey) {
+    throw new IngestError(
+      'Add a Gemini key (preferred) or OpenAI key in Settings before adding sources.',
+      'missing_key',
+    );
   }
 
-  const geminiOpts: ContextDocCallOptions = {
+  const ctxOpts: ContextDocCallOptions = {
     posthogDistinctId: opts.posthogDistinctId,
     posthogTraceId: opts.posthogTraceId,
     posthogPrivacyMode: opts.posthogPrivacyMode,
@@ -137,16 +161,132 @@ export async function runIngest(
 
   switch (input.kind) {
     case 'pdf':
-      return ingestPdf(input, keys.geminiKey, geminiOpts);
+      return ingestPdf(input, keys, ctxOpts);
     case 'url':
       if (!keys.tavilyKey) {
         throw new IngestError('Tavily API key required for URL ingest', 'missing_key');
       }
-      return ingestUrl(input, keys, geminiOpts, opts);
+      return ingestUrl(input, keys, ctxOpts, opts);
     case 'doc':
-      return ingestDoc(input, keys.geminiKey, geminiOpts);
+      return ingestDoc(input, keys, ctxOpts);
     case 'md':
-      return ingestMarkdown(input, keys.geminiKey, geminiOpts);
+      return ingestMarkdown(input, keys, ctxOpts);
+  }
+}
+
+/**
+ * Shared helper that runs Gemini first, falls back to OpenAI on
+ * failure, and translates the *final* error into a typed `IngestError`
+ * carrying the right provider (so the UI can say "fix your <X> key").
+ *
+ * Two key behaviours worth knowing about:
+ *
+ *   1. We translate `OpenAIIngestInput` from a Gemini-shaped input by
+ *      adding a `filename` for PDFs (OpenAI requires it on the file
+ *      content part). Text inputs are identical.
+ *
+ *   2. When both providers fail we surface the OpenAI error (the
+ *      latest one) but include both messages so the user can fix
+ *      whichever is the cheaper repair.
+ */
+async function runContextDocWithFallback(
+  geminiInput:
+    | { kind: 'pdf'; buffer: Buffer; mimeType: 'application/pdf'; filename: string }
+    | { kind: 'text'; text: string; contextHint?: string },
+  keys: IngestKeys,
+  ctxOpts: ContextDocCallOptions,
+): Promise<ContextDoc> {
+  const hasGemini = !!(keys.geminiKey && keys.geminiKey.length >= 8);
+  const hasOpenAI = !!(keys.openaiKey && keys.openaiKey.length >= 8);
+
+  // Primary: Gemini Flash (if present)
+  if (hasGemini) {
+    try {
+      // The Gemini path doesn't consume `filename` — drop it before
+      // calling so we don't widen the existing GeminiInput type.
+      const geminiCallInput =
+        geminiInput.kind === 'pdf'
+          ? {
+              kind: 'pdf' as const,
+              buffer: geminiInput.buffer,
+              mimeType: geminiInput.mimeType,
+            }
+          : {
+              kind: 'text' as const,
+              text: geminiInput.text,
+              contextHint: geminiInput.contextHint,
+            };
+      return await contextDoc(keys.geminiKey!, geminiCallInput, ctxOpts);
+    } catch (geminiErr) {
+      if (!hasOpenAI) {
+        const classified = classifyProviderError(geminiErr, 'gemini');
+        throw new IngestError(
+          classified.message,
+          classified.code,
+          geminiErr,
+          classified.provider,
+          classified.status,
+        );
+      }
+      // Fall through to OpenAI fallback.
+      try {
+        const openAiInput: OpenAIIngestInput =
+          geminiInput.kind === 'pdf'
+            ? {
+                kind: 'pdf',
+                buffer: geminiInput.buffer,
+                filename: geminiInput.filename,
+                mimeType: geminiInput.mimeType,
+              }
+            : {
+                kind: 'text',
+                text: geminiInput.text,
+                contextHint: geminiInput.contextHint,
+              };
+        return await openAIContextDoc(keys.openaiKey!, openAiInput, ctxOpts);
+      } catch (openAiErr) {
+        // Both failed — surface the OpenAI error since it was the
+        // latest. Include the Gemini reason in the message so the
+        // user can decide which key is easier to fix.
+        const classified = classifyProviderError(openAiErr, 'openai');
+        const geminiMsg =
+          geminiErr instanceof Error ? geminiErr.message : String(geminiErr);
+        throw new IngestError(
+          `${classified.message} (Gemini also failed: ${geminiMsg})`,
+          classified.code,
+          openAiErr,
+          classified.provider,
+          classified.status,
+        );
+      }
+    }
+  }
+
+  // No Gemini key — go straight to OpenAI.
+  try {
+    const openAiInput: OpenAIIngestInput =
+      geminiInput.kind === 'pdf'
+        ? {
+            kind: 'pdf',
+            buffer: geminiInput.buffer,
+            filename: geminiInput.filename,
+            mimeType: geminiInput.mimeType,
+          }
+        : {
+            kind: 'text',
+            text: geminiInput.text,
+            contextHint: geminiInput.contextHint,
+          };
+    return await openAIContextDoc(keys.openaiKey!, openAiInput, ctxOpts);
+  } catch (openAiErr) {
+    const classified = classifyProviderError(openAiErr, 'openai');
+    throw new IngestError(
+      classified.message,
+      classified.code,
+      openAiErr,
+      classified.provider,
+      classified.status,
+    );
   }
 }
 
@@ -156,26 +296,19 @@ export async function runIngest(
 
 async function ingestPdf(
   input: Extract<IngestInput, { kind: 'pdf' }>,
-  geminiKey: string,
-  geminiOpts: ContextDocCallOptions,
+  keys: IngestKeys,
+  ctxOpts: ContextDocCallOptions,
 ): Promise<IngestResult> {
-  let doc: ContextDoc;
-  try {
-    doc = await contextDoc(
-      geminiKey,
-      { kind: 'pdf', buffer: input.buffer, mimeType: 'application/pdf' },
-      geminiOpts,
-    );
-  } catch (err) {
-    const providerError = classifyProviderError(err, 'gemini');
-    throw new IngestError(
-      providerError.message,
-      providerError.code,
-      err,
-      providerError.provider,
-      providerError.status,
-    );
-  }
+  const doc = await runContextDocWithFallback(
+    {
+      kind: 'pdf',
+      buffer: input.buffer,
+      mimeType: 'application/pdf',
+      filename: input.filename,
+    },
+    keys,
+    ctxOpts,
+  );
   return {
     contextDoc: doc,
     meta: {
@@ -190,7 +323,7 @@ async function ingestPdf(
 async function ingestUrl(
   input: Extract<IngestInput, { kind: 'url' }>,
   keys: IngestKeys,
-  geminiOpts: ContextDocCallOptions,
+  ctxOpts: ContextDocCallOptions,
   opts: IngestRunOptions,
 ): Promise<IngestResult> {
   let host = '';
@@ -257,28 +390,16 @@ async function ingestUrl(
     }
   }
 
-  // 2. Hand markdown to Gemini.
-  let doc: ContextDoc;
-  try {
-    doc = await contextDoc(
-      keys.geminiKey,
-      {
-        kind: 'text',
-        text: markdown,
-        contextHint: `From URL ${rawUrl} (host: ${host}).`,
-      },
-      geminiOpts,
-    );
-  } catch (err) {
-    const providerError = classifyProviderError(err, 'gemini');
-    throw new IngestError(
-      providerError.message,
-      providerError.code,
-      err,
-      providerError.provider,
-      providerError.status,
-    );
-  }
+  // 2. Hand markdown to the indexer (Gemini → OpenAI fallback).
+  const doc = await runContextDocWithFallback(
+    {
+      kind: 'text',
+      text: markdown,
+      contextHint: `From URL ${rawUrl} (host: ${host}).`,
+    },
+    keys,
+    ctxOpts,
+  );
 
   // Prefer Tavily's title for the snippet preview because the page title
   // is usually a better quick-glance label than Gemini's reformulation.
@@ -304,8 +425,8 @@ async function ingestUrl(
 
 async function ingestDoc(
   input: Extract<IngestInput, { kind: 'doc' }>,
-  geminiKey: string,
-  geminiOpts: ContextDocCallOptions,
+  keys: IngestKeys,
+  ctxOpts: ContextDocCallOptions,
 ): Promise<IngestResult> {
   let parsed: { text: string; html: string };
   try {
@@ -321,27 +442,15 @@ async function ingestDoc(
     throw new IngestError('.docx file appears to be empty', 'parse_failed');
   }
 
-  let doc: ContextDoc;
-  try {
-    doc = await contextDoc(
-      geminiKey,
-      {
-        kind: 'text',
-        text: parsed.text,
-        contextHint: `From Word document ${input.filename}.`,
-      },
-      geminiOpts,
-    );
-  } catch (err) {
-    const providerError = classifyProviderError(err, 'gemini');
-    throw new IngestError(
-      providerError.message,
-      providerError.code,
-      err,
-      providerError.provider,
-      providerError.status,
-    );
-  }
+  const doc = await runContextDocWithFallback(
+    {
+      kind: 'text',
+      text: parsed.text,
+      contextHint: `From Word document ${input.filename}.`,
+    },
+    keys,
+    ctxOpts,
+  );
 
   return {
     contextDoc: doc,
@@ -357,36 +466,24 @@ async function ingestDoc(
 
 async function ingestMarkdown(
   input: Extract<IngestInput, { kind: 'md' }>,
-  geminiKey: string,
-  geminiOpts: ContextDocCallOptions,
+  keys: IngestKeys,
+  ctxOpts: ContextDocCallOptions,
 ): Promise<IngestResult> {
   if (!input.text.trim()) {
     throw new IngestError('Markdown content is empty', 'invalid_input');
   }
 
-  let doc: ContextDoc;
-  try {
-    doc = await contextDoc(
-      geminiKey,
-      {
-        kind: 'text',
-        text: input.text,
-        contextHint: input.title
-          ? `From a markdown note titled "${input.title}".`
-          : 'From a markdown note pasted into Siftie.',
-      },
-      geminiOpts,
-    );
-  } catch (err) {
-    const providerError = classifyProviderError(err, 'gemini');
-    throw new IngestError(
-      providerError.message,
-      providerError.code,
-      err,
-      providerError.provider,
-      providerError.status,
-    );
-  }
+  const doc = await runContextDocWithFallback(
+    {
+      kind: 'text',
+      text: input.text,
+      contextHint: input.title
+        ? `From a markdown note titled "${input.title}".`
+        : 'From a markdown note pasted into Siftie.',
+    },
+    keys,
+    ctxOpts,
+  );
 
   // Markdown sources show the raw markup as their preview because the
   // user already chose what to write — better than re-summarising.

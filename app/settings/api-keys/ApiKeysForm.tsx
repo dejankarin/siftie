@@ -22,14 +22,16 @@ const PROVIDER_META: Record<Provider, {
   openai: {
     label: 'OpenAI (GPT-5.4)',
     required: true,
-    caption: 'Primary model for Ideate (candidate prompt generation). Direct from platform.openai.com.',
+    caption:
+      'Primary for Ideate · Fallback for source ingestion when Gemini is unavailable. Direct from platform.openai.com.',
     helpUrl: 'https://platform.openai.com/api-keys',
     helpText: 'Get a key from OpenAI Platform',
   },
   gemini: {
     label: 'Google Gemini',
     required: true,
-    caption: 'Source ingestion (Flash) + Ideate fallback (Pro) when OpenAI is unavailable.',
+    caption:
+      'Primary for source ingestion (Flash) · Fallback for Ideate (Pro) when OpenAI is unavailable.',
     helpUrl: 'https://aistudio.google.com/apikey',
     helpText: 'Get a key from Google AI Studio',
   },
