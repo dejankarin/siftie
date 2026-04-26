@@ -1,4 +1,5 @@
 import { UserButton } from '@clerk/nextjs';
+import { KeyRound } from 'lucide-react';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import type { Theme } from '../hooks/useTheme';
 import { ThemeToggle } from './ThemeToggle';
@@ -56,15 +57,8 @@ function OfflineBanner() {
   );
 }
 
-// Tiny inline key glyph for the "API Keys" menu item (Clerk's labelIcon
-// expects a 16x16 SVG; importing lucide-react would bloat the bundle for
-// this single icon).
+// Clerk's labelIcon expects a 16x16 SVG. Lucide icons render as SVGs and
+// are tree-shaken, so a single import adds only this glyph to the bundle.
 function KeyGlyph() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="7.5" cy="15.5" r="5.5" />
-      <path d="m21 2-9.6 9.6" />
-      <path d="m15.5 7.5 3 3L22 7l-3-3" />
-    </svg>
-  );
+  return <KeyRound size={16} strokeWidth={2} aria-hidden="true" />;
 }

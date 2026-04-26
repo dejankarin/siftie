@@ -6,76 +6,13 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
+import { ChevronDown, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { SOURCE_TYPES } from '../data/mock';
 import type { Source } from '../types';
 import { RunResearchButton } from './RunResearchButton';
 import type { AddTab } from './AddSourceModal';
 
-type ViewMode = 'compact' | 'detailed';
 type SortMode = 'recent' | 'type' | 'title';
-
-const VIEW_STORAGE_KEY = 'siftie.sourcesView';
-
-interface IconProps {
-  size?: number;
-}
-
-function PlusIcon({ size = 14 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  );
-}
-function SearchIcon({ size = 14 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="11" cy="11" r="7" />
-      <path d="m20 20-3.5-3.5" />
-    </svg>
-  );
-}
-function EditIcon({ size = 13 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z" />
-    </svg>
-  );
-}
-function TrashIcon({ size = 13 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 6h18" />
-      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-      <path d="M10 11v6M14 11v6" />
-    </svg>
-  );
-}
-function RenamePencilIcon({ size = 12 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z" />
-    </svg>
-  );
-}
-function CompactIcon({ size = 14 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 6h16M4 12h16M4 18h16" />
-    </svg>
-  );
-}
-function DetailedIcon({ size = 14 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="4" width="18" height="7" rx="1.5" />
-      <rect x="3" y="13" width="18" height="7" rx="1.5" />
-    </svg>
-  );
-}
 
 function TypeChip({ type, dense = false }: { type: Source['type']; dense?: boolean }) {
   const t = SOURCE_TYPES[type];
@@ -128,7 +65,7 @@ function AddMenu({ onPick }: { onPick: (tab: AddTab) => void }) {
         aria-expanded={open}
         className="btn-primary inline-flex items-center gap-1.5 px-3 h-8 text-[12.5px] font-medium"
       >
-        <PlusIcon />
+        <Plus size={14} strokeWidth={1.8} aria-hidden="true" />
         Add source
       </button>
       {open && (
@@ -153,37 +90,6 @@ function AddMenu({ onPick }: { onPick: (tab: AddTab) => void }) {
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-function ViewToggle({ value, onChange }: { value: ViewMode; onChange: (v: ViewMode) => void }) {
-  return (
-    <div role="tablist" aria-label="Source view" className="flex items-center bg-[var(--surface-2)] rounded-lg p-0.5">
-      <button
-        type="button"
-        role="tab"
-        aria-selected={value === 'compact'}
-        onClick={() => onChange('compact')}
-        title="Compact view"
-        className={`flex items-center justify-center w-7 h-6 rounded-md transition ${
-          value === 'compact' ? 'bg-[var(--surface)] text-[var(--ink)] shadow-sm' : 'text-[var(--ink-3)] hover:text-[var(--ink-2)]'
-        }`}
-      >
-        <CompactIcon />
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={value === 'detailed'}
-        onClick={() => onChange('detailed')}
-        title="Detailed view"
-        className={`flex items-center justify-center w-7 h-6 rounded-md transition ${
-          value === 'detailed' ? 'bg-[var(--surface)] text-[var(--ink)] shadow-sm' : 'text-[var(--ink-3)] hover:text-[var(--ink-2)]'
-        }`}
-      >
-        <DetailedIcon />
-      </button>
     </div>
   );
 }
@@ -222,7 +128,7 @@ function CompactRow({
           title="Edit"
           className="btn-ghost flex items-center justify-center w-7 h-7 text-[var(--ink-3)] hover:text-[var(--ink)]"
         >
-          <EditIcon />
+          <Pencil size={13} strokeWidth={1.6} aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -231,61 +137,8 @@ function CompactRow({
           title="Remove"
           className="btn-ghost flex items-center justify-center w-7 h-7 text-[var(--ink-3)] hover:text-[var(--ink)]"
         >
-          <TrashIcon />
+          <Trash2 size={13} strokeWidth={1.6} aria-hidden="true" />
         </button>
-      </div>
-    </div>
-  );
-}
-
-function DetailedCard({
-  source,
-  analyzing,
-  onEdit,
-  onRemove,
-}: {
-  source: Source;
-  analyzing: boolean;
-  onEdit: (s: Source) => void;
-  onRemove: (id: string) => void;
-}) {
-  return (
-    <div className="src-card p-3.5 group relative">
-      <div className="flex items-start gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <TypeChip type={source.type} />
-            {analyzing && (
-              <span className="text-[10.5px] text-[var(--ink-3)] flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse"></span>
-                Analyzing
-              </span>
-            )}
-          </div>
-          <h4 className="mt-1.5 text-[13.5px] font-medium leading-snug text-[var(--ink)] truncate">{source.title}</h4>
-          <p className="text-[11.5px] text-[var(--ink-3)] mt-0.5">{source.meta}</p>
-          <p className="text-[12.5px] text-[var(--ink-2)] mt-2 leading-relaxed line-clamp-3">{source.snippet}</p>
-        </div>
-        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition">
-          <button
-            type="button"
-            onClick={() => onEdit(source)}
-            aria-label={`Edit ${source.title}`}
-            title="Edit"
-            className="btn-ghost flex items-center justify-center w-7 h-7 text-[var(--ink-3)] hover:text-[var(--ink)]"
-          >
-            <EditIcon />
-          </button>
-          <button
-            type="button"
-            onClick={() => onRemove(source.id)}
-            aria-label={`Remove ${source.title}`}
-            title="Remove"
-            className="btn-ghost flex items-center justify-center w-7 h-7 text-[var(--ink-3)] hover:text-[var(--ink)]"
-          >
-            <TrashIcon />
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -316,12 +169,6 @@ export interface SourcesColumnProps {
 
 const TYPE_ORDER: Record<Source['type'], number> = { pdf: 0, url: 1, doc: 2, md: 3 };
 
-function getInitialView(): ViewMode {
-  if (typeof window === 'undefined') return 'detailed';
-  const stored = window.localStorage.getItem(VIEW_STORAGE_KEY);
-  return stored === 'compact' || stored === 'detailed' ? stored : 'detailed';
-}
-
 export function SourcesColumn({
   sources,
   onRemoveSource,
@@ -339,17 +186,12 @@ export function SourcesColumn({
   runStatus,
   canRunResearch,
 }: SourcesColumnProps) {
-  const [view, setView] = useState<ViewMode>(getInitialView);
   const [sort, setSort] = useState<SortMode>('recent');
   const [query, setQuery] = useState('');
   const [renaming, setRenaming] = useState(renameOnMount);
   const [draftName, setDraftName] = useState(researchName);
   const [reindexing, setReindexing] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    window.localStorage.setItem(VIEW_STORAGE_KEY, view);
-  }, [view]);
 
   useEffect(() => {
     if (renaming) {
@@ -469,7 +311,7 @@ export function SourcesColumn({
                   title="Rename research"
                   className="btn-ghost flex items-center justify-center w-6 h-6 text-[var(--ink-3)] hover:text-[var(--ink)] opacity-0 group-hover/research-name:opacity-100 focus-within:opacity-100 transition shrink-0"
                 >
-                  <RenamePencilIcon />
+                  <Pencil size={12} strokeWidth={1.6} aria-hidden="true" />
                 </button>
               </>
             )}
@@ -482,7 +324,7 @@ export function SourcesColumn({
         <label className="relative block">
           <span className="sr-only">Search sources</span>
           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--ink-3)] pointer-events-none">
-            <SearchIcon />
+            <Search size={14} strokeWidth={1.6} aria-hidden="true" />
           </span>
           <input
             value={query}
@@ -491,21 +333,25 @@ export function SourcesColumn({
             className="w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] pl-8 pr-3 h-8 text-[12.5px] focus-ring text-[var(--ink)] placeholder:text-[var(--ink-3)]"
           />
         </label>
-        <div className="flex items-center justify-between gap-2">
-          <div className="relative">
+        <div className="flex items-center gap-2">
+          <div className="relative inline-flex">
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as SortMode)}
               aria-label="Sort sources"
-              className="appearance-none pill bg-[var(--surface)] text-[11.5px] text-[var(--ink-2)] pl-2.5 pr-7 h-7 cursor-pointer"
+              className="appearance-none rounded-md bg-transparent border-0 hover:bg-[var(--surface-2)] text-[11.5px] text-[var(--ink-2)] hover:text-[var(--ink)] pl-2 pr-6 h-7 cursor-pointer focus-ring transition-colors"
             >
               <option value="recent">Recent</option>
               <option value="type">Type</option>
               <option value="title">Title</option>
             </select>
-            <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[var(--ink-3)] text-[10px]">▾</span>
+            <ChevronDown
+              size={12}
+              strokeWidth={1.8}
+              aria-hidden="true"
+              className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[var(--ink-3)]"
+            />
           </div>
-          <ViewToggle value={view} onChange={setView} />
         </div>
       </div>
 
@@ -526,7 +372,7 @@ export function SourcesColumn({
         </div>
       )}
 
-      <div className={`flex-1 min-h-0 scroll-y px-3 pb-3 ${view === 'compact' ? 'space-y-1' : 'space-y-2.5 px-5'}`}>
+      <div className="flex-1 min-h-0 scroll-y px-3 pb-3 space-y-1">
         {sources.length === 0 ? (
           <div className="mx-2 border border-dashed border-[var(--line)] rounded-2xl p-8 text-center">
             <p className="text-[13px] font-medium text-[var(--ink)]">Upload contents for this research</p>
@@ -538,7 +384,7 @@ export function SourcesColumn({
               onClick={() => onAdd('pdf')}
               className="btn-primary mt-3 inline-flex items-center gap-1.5 px-3 h-8 text-[12.5px] font-medium"
             >
-              <PlusIcon />
+              <Plus size={14} strokeWidth={1.8} aria-hidden="true" />
               Add source
             </button>
           </div>
@@ -553,19 +399,15 @@ export function SourcesColumn({
               Clear search
             </button>
           </div>
-        ) : view === 'compact' ? (
-          filtered.map((s) => (
-            <CompactRow key={s.id} source={s} analyzing={s.pending || s.id === analyzingId} onEdit={onEdit} onRemove={removeSource} />
-          ))
         ) : (
           filtered.map((s) => (
-            <DetailedCard key={s.id} source={s} analyzing={s.pending || s.id === analyzingId} onEdit={onEdit} onRemove={removeSource} />
+            <CompactRow key={s.id} source={s} analyzing={s.pending || s.id === analyzingId} onEdit={onEdit} onRemove={removeSource} />
           ))
         )}
       </div>
 
       {sources.length > 0 && (
-        <div className="shrink-0 px-5 pb-5 pt-3 border-t border-[var(--line-2)] mt-auto">
+        <div className="shrink-0 px-5 py-5 border-t border-[var(--line-2)] mt-auto">
           <RunResearchButton
             onClick={onRunResearch}
             onCancel={onCancelResearch}

@@ -1,72 +1,15 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  Check,
+  ChevronRight,
+  FlaskConical,
+  Folder,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+} from 'lucide-react';
 import type { Project, Research } from '../types';
-
-interface IconProps {
-  size?: number;
-}
-
-function PlusIcon({ size = 14 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  );
-}
-function FolderIcon({ size = 14 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
-    </svg>
-  );
-}
-function BeakerIcon({ size = 13 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M9 3h6" />
-      <path d="M10 3v6L4 19a2 2 0 0 0 1.7 3h12.6A2 2 0 0 0 20 19l-6-10V3" />
-      <path d="M7 14h10" />
-    </svg>
-  );
-}
-function PencilIcon({ size = 12 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z" />
-    </svg>
-  );
-}
-function TrashIcon({ size = 12 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 6h18" />
-      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-      <path d="M10 11v6M14 11v6" />
-    </svg>
-  );
-}
-function CheckIcon({ size = 12 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M5 13l4 4L19 7" />
-    </svg>
-  );
-}
-function ChevronRightIcon({ size = 12 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="m9 6 6 6-6 6" />
-    </svg>
-  );
-}
-function CloseIcon({ size = 14 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M6 6l12 12M18 6L6 18" />
-    </svg>
-  );
-}
 
 function dateLabel(timestamp: number): string {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(timestamp));
@@ -118,7 +61,7 @@ export function ResearchNav(props: ResearchNavProps) {
             className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-[var(--surface-2)] transition text-left"
           >
             <span className="flex items-center justify-center w-5 h-5 text-[var(--ink-2)] group-hover:text-[var(--ink)]">
-              <PlusIcon />
+              <Plus size={14} strokeWidth={1.8} aria-hidden="true" />
             </span>
             <span className="flex-1 text-[13.5px] font-medium text-[var(--ink)] leading-tight">New research</span>
             <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 h-5 rounded border border-[var(--line)] bg-[var(--surface-2)] text-[10.5px] text-[var(--ink-3)] font-mono">
@@ -139,7 +82,7 @@ export function ResearchNav(props: ResearchNavProps) {
             className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-[var(--surface-2)] transition text-left"
           >
             <span className="flex items-center justify-center w-5 h-5 text-[var(--ink-2)] group-hover:text-[var(--ink)]">
-              <FolderIcon />
+              <Folder size={14} strokeWidth={1.6} aria-hidden="true" />
             </span>
             <span className="flex-1 text-[13.5px] text-[var(--ink)] leading-tight">Projects</span>
             <span className="text-[10.5px] text-[var(--ink-3)] tabular-nums pr-0.5">{totalResearches}</span>
@@ -303,7 +246,7 @@ function ProjectsPanel(props: ProjectsPanelProps) {
             aria-label="Close"
             className="btn-ghost flex items-center justify-center w-8 h-8 text-[var(--ink-3)] hover:text-[var(--ink)]"
           >
-            <CloseIcon />
+            <X size={14} strokeWidth={1.8} aria-hidden="true" />
           </button>
         </div>
 
@@ -330,11 +273,11 @@ function ProjectsPanel(props: ProjectsPanelProps) {
                     className="flex items-center justify-center w-5 h-5 text-[var(--ink-3)] hover:text-[var(--ink-2)] shrink-0"
                   >
                     <span className={`transition-transform ${isOpen ? 'rotate-90' : ''}`}>
-                      <ChevronRightIcon />
+                      <ChevronRight size={12} strokeWidth={1.8} aria-hidden="true" />
                     </span>
                   </button>
                   <span className="flex items-center justify-center w-5 h-5 text-[var(--accent-ink)] shrink-0">
-                    <FolderIcon size={13} />
+                    <Folder size={13} strokeWidth={1.6} aria-hidden="true" />
                   </span>
                   {isRenamingProject ? (
                     <input
@@ -357,7 +300,7 @@ function ProjectsPanel(props: ProjectsPanelProps) {
                       </span>
                       {isActiveProject && (
                         <span className="text-[var(--success-ink)] shrink-0" aria-label="Active project">
-                          <CheckIcon />
+                          <Check size={12} strokeWidth={2} aria-hidden="true" />
                         </span>
                       )}
                     </button>
@@ -371,7 +314,7 @@ function ProjectsPanel(props: ProjectsPanelProps) {
                         title="Rename"
                         className="btn-ghost flex items-center justify-center w-6 h-6 text-[var(--ink-3)] hover:text-[var(--ink)]"
                       >
-                        <PencilIcon />
+                        <Pencil size={12} strokeWidth={1.6} aria-hidden="true" />
                       </button>
                       <button
                         type="button"
@@ -381,7 +324,7 @@ function ProjectsPanel(props: ProjectsPanelProps) {
                         title={projects.length <= 1 ? 'Need at least one project' : 'Delete'}
                         className="btn-ghost flex items-center justify-center w-6 h-6 text-[var(--ink-3)] hover:text-[var(--ink)] disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        <TrashIcon />
+                        <Trash2 size={12} strokeWidth={1.6} aria-hidden="true" />
                       </button>
                     </div>
                   )}
@@ -416,7 +359,7 @@ function ProjectsPanel(props: ProjectsPanelProps) {
                               className="flex-1 min-w-0 flex items-center gap-2 text-left"
                             >
                               <span className="flex items-center justify-center w-4 h-4 text-[var(--accent-ink)] shrink-0">
-                                <BeakerIcon size={11} />
+                                <FlaskConical size={11} strokeWidth={1.6} aria-hidden="true" />
                               </span>
                               <span className="min-w-0 flex-1">
                                 <span className="block text-[12.5px] text-[var(--ink)] truncate leading-tight">
@@ -428,7 +371,7 @@ function ProjectsPanel(props: ProjectsPanelProps) {
                               </span>
                               {isActiveResearch && (
                                 <span className="text-[var(--success-ink)] shrink-0" aria-label="Active research">
-                                  <CheckIcon />
+                                  <Check size={12} strokeWidth={2} aria-hidden="true" />
                                 </span>
                               )}
                             </button>
@@ -442,7 +385,7 @@ function ProjectsPanel(props: ProjectsPanelProps) {
                                 title="Rename"
                                 className="btn-ghost flex items-center justify-center w-6 h-6 text-[var(--ink-3)] hover:text-[var(--ink)]"
                               >
-                                <PencilIcon />
+                                <Pencil size={12} strokeWidth={1.6} aria-hidden="true" />
                               </button>
                               <button
                                 type="button"
@@ -451,7 +394,7 @@ function ProjectsPanel(props: ProjectsPanelProps) {
                                 title="Delete"
                                 className="btn-ghost flex items-center justify-center w-6 h-6 text-[var(--ink-3)] hover:text-[var(--ink)]"
                               >
-                                <TrashIcon />
+                                <Trash2 size={12} strokeWidth={1.6} aria-hidden="true" />
                               </button>
                             </div>
                           )}
@@ -474,7 +417,7 @@ function ProjectsPanel(props: ProjectsPanelProps) {
             onClick={onCreateProject}
             className="btn-ghost inline-flex items-center gap-1.5 px-2.5 h-8 text-[12.5px] text-[var(--ink-2)] hover:text-[var(--ink)]"
           >
-            <PlusIcon />
+            <Plus size={14} strokeWidth={1.8} aria-hidden="true" />
             New project
           </button>
           <button
@@ -482,7 +425,7 @@ function ProjectsPanel(props: ProjectsPanelProps) {
             onClick={onCreateResearch}
             className="btn-primary inline-flex items-center gap-1.5 px-3 h-8 text-[12.5px] font-medium"
           >
-            <PlusIcon />
+            <Plus size={14} strokeWidth={1.8} aria-hidden="true" />
             New research in {activeProject.name}
           </button>
         </div>

@@ -33,6 +33,8 @@ Beyond the original plan, the following also shipped:
 - **Markdown report download (Session 6.6)** — `GET /api/research/[runId]/report` streams a comprehensive Markdown export (TL;DR via Gemini Flash, run metadata, sources table, prompt portfolio with per-prompt Chair rationales, full Council transcript) wired to the **Download report** button at the bottom of the prompts column.
 - **Deep-link routing** — `/app/[projectId]/[researchId]` server route validates ownership in one query and falls back to `redirect('/app')` on mismatch (no information leak). The client keeps URL ⇄ active-pair in sync bidirectionally so the browser back button walks recent research switches naturally.
 - **`sources` Realtime sync** — third `postgres_changes` handler (alongside `messages` and `runs`) on the same Supabase channel keeps the sources column consistent across multiple tabs of the same workspace, with insert/update/delete coverage and dedupe against the local optimistic-swap path.
+- **Lucide icon system** — every UI icon across the app (TopBar, SettingsTopBar, ThemeToggle, ResearchNav, SourcesColumn) is rendered from [`lucide-react`](https://lucide.dev/). Hand-rolled inline SVG components are gone; Lucide is the only icon source going forward (brand assets in `Images/` and `app/icon.svg` excluded). Tree-shaken so only the imported glyphs ship in the bundle.
+- **Sources column simplification** — dropped the compact/detailed view toggle in favour of a single list view, and rebuilt the "Recent" sort control as a borderless ghost dropdown with a Lucide `ChevronDown` indicator (was a fully-rounded pill).
 - **PostHog Logs** via OpenTelemetry / OTLP HTTP — every server log line ships to PostHog Cloud EU as structured events keyed by Clerk user id and run id (production only).
 - **PostHog feature flags** server-resolved and bootstrapped to the browser on every render so flag values match what the server saw — no flicker.
 - **PostHog group analytics** so events are also attributed to the active Siftie project.
@@ -58,7 +60,7 @@ Other scripts:
 
 ## Tech stack
 
-**Framework:** Next.js 15 (App Router) · React 18 · TypeScript · Tailwind v3 · deployed on Vercel (Fluid Compute, Node.js 24)
+**Framework:** Next.js 15 (App Router) · React 18 · TypeScript · Tailwind v3 · [Lucide](https://lucide.dev/) icons via `lucide-react` (the only icon source — no inline hand-rolled SVGs) · deployed on Vercel (Fluid Compute, Node.js 24)
 
 **Auth:** Clerk (`@clerk/nextjs`) — `<ClerkProvider>` in `app/layout.tsx`, `clerkMiddleware()` in `middleware.ts`, prebuilt sign-in / sign-up pages, `<UserButton />` in TopBar.
 
@@ -75,7 +77,7 @@ Other scripts:
 | Interview questions | `gemini-3-flash-preview` | Gemini API | First six gap-attributed questions per research. |
 | **Ideate (primary)** | **`gpt-5.4`** | **OpenAI Platform** | ~24 candidate prompts, structured output via `response_format: json_schema`, reasoning model with `reasoning_effort: 'low'`. |
 | Ideate (fallback) | `gemini-3.1-pro-preview` | Gemini API | `ThinkingLevel.MEDIUM`. Paid tier only (no free tier on Pro 3.1). |
-| Council reviewers | `openai/gpt-5.4`, `google/gemini-3.1-pro-preview`, `anthropic/claude-opus-4.5`, `x-ai/grok-4` | OpenRouter | Anonymised seats 1–4. Quick depth = 3 seats; Standard = 4. |
+| Council reviewers | `openai/gpt-5.4`, `google/gemini-3.1-pro-preview`, `anthropic/claude-opus-4.5`, `x-ai/grok-4` | OpenRouter | Anonymised seats 1–4. Every run uses Standard depth (all 4 reviewers); no user-facing depth selector. |
 | Council Chair | `google/gemini-3.1-pro-preview` | OpenRouter | Synthesises the final picks with per-prompt `councilNote`. |
 
 **Web layer:** Tavily (`@tavily/core`) — `extract` for URL ingestion, `search` reserved for the Session 8 reply router action.

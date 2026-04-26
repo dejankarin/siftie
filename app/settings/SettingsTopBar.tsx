@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { UserButton } from '@clerk/nextjs';
+import { ArrowLeft } from 'lucide-react';
 import { ThemeToggle } from '@/src/components/ThemeToggle';
 import { useOnlineStatus } from '@/src/hooks/useOnlineStatus';
 import { useTheme } from '@/src/hooks/useTheme';
@@ -27,7 +28,7 @@ export function SettingsTopBar() {
             href="/app"
             className="btn-primary inline-flex items-center gap-1.5 px-3 h-8 text-[12.5px] font-medium"
           >
-            <ArrowLeftIcon />
+            <ArrowLeft size={14} strokeWidth={1.8} aria-hidden="true" />
             Back to home
           </Link>
           <span className="w-px h-5 bg-[var(--line)] mx-1" />
@@ -37,24 +38,6 @@ export function SettingsTopBar() {
         </div>
       </div>
     </header>
-  );
-}
-
-function ArrowLeftIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M19 12H5M12 19l-7-7 7-7" />
-    </svg>
   );
 }
 

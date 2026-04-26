@@ -347,7 +347,7 @@ export function PromptsColumn({
         ))}
       </div>
 
-      <div className="px-5 pb-5 pt-2 border-t border-[var(--line-2)] mt-auto">
+      <div className="px-5 py-5 border-t border-[var(--line-2)] mt-auto">
         <button
           type="button"
           onClick={() => void downloadReport()}
