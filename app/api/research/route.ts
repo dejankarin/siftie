@@ -24,9 +24,13 @@ import { waitUntil } from '@vercel/functions';
 import { z } from 'zod';
 
 export const runtime = 'nodejs';
-// 30 s is plenty for the validation + insert. The actual orchestration
-// runs inside `waitUntil` and isn't constrained by this number.
-export const maxDuration = 30;
+// `waitUntil` is bounded by the function's `maxDuration` — it does NOT
+// extend the function past it. The full Ideate → Peec → Council → Chair
+// pipeline runs ~30-90s end-to-end (Ideate alone is ~15-20s on gpt-5.4),
+// so we need a budget that covers the worst case. 300s matches Vercel's
+// Fluid Compute default and gives ~3x headroom over the typical run.
+// If we ever migrate the pipeline to a queue, this can drop back to 30.
+export const maxDuration = 300;
 
 const Body = z.object({
   researchId: z.string().uuid(),
