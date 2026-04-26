@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { CouncilDepth, Message } from '../types';
 
+const REVIEWER_MODELS = ['Gemini', 'Perplexity', 'Claude', 'OpenAI'] as const;
+
 /**
  * Pick the label + chip color for a council bubble. Reviewers are
  * deliberately anonymised ("Reviewer 1") so users don't anchor on a
@@ -130,6 +132,20 @@ export function ChatColumn({
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const [showAddReviewers, setShowAddReviewers] = useState(false);
+  const [reviewersOpen, setReviewersOpen] = useState(false);
+  const reviewersRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!reviewersOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (reviewersRef.current && !reviewersRef.current.contains(e.target as Node)) {
+        setReviewersOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [reviewersOpen]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -163,19 +179,65 @@ export function ChatColumn({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div>
-              <h2 className="text-[15px] font-semibold tracking-tight text-[var(--ink)]">Siftie</h2>
+              <h2 className="text-[15px] font-semibold tracking-tight text-[var(--ink)]">Council</h2>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="text-[11.5px] text-[var(--ink-3)]">Active · analyzing {sourcesCount} sources</span>
               </div>
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <button type="button" className="btn-ghost px-2 py-1 text-[11.5px] text-[var(--ink-3)] hover:text-[var(--ink)]">
-              History
-            </button>
-            <button type="button" className="btn-ghost px-2 py-1 text-[11.5px] text-[var(--ink-3)] hover:text-[var(--ink)]">
-              More
-            </button>
+            {!showAddReviewers && (
+              <button
+                type="button"
+                className="btn-ghost px-2 py-1 text-[11.5px] text-[var(--ink-3)] hover:text-[var(--ink)]"
+              >
+                History
+              </button>
+            )}
+            <div ref={reviewersRef} className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!showAddReviewers) {
+                    setShowAddReviewers(true);
+                  } else {
+                    setReviewersOpen((v) => !v);
+                  }
+                }}
+                aria-haspopup={showAddReviewers ? 'menu' : undefined}
+                aria-expanded={showAddReviewers ? reviewersOpen : undefined}
+                className="btn-ghost px-2 py-1 text-[11.5px] text-[var(--ink-3)] hover:text-[var(--ink)]"
+              >
+                {showAddReviewers ? 'Add more reviewers' : 'More'}
+              </button>
+              {showAddReviewers && reviewersOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full mt-1.5 z-20 min-w-[180px] rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-[var(--shadow-input)] py-1"
+                >
+                  {REVIEWER_MODELS.map((model) => (
+                    <button
+                      key={model}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => setReviewersOpen(false)}
+                      className="w-full text-left px-3 py-1.5 text-[12px] text-[var(--ink)] hover:bg-[var(--surface-2)]"
+                    >
+                      {model}
+                    </button>
+                  ))}
+                  <div className="my-1 border-t border-[var(--line-2)]" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => setReviewersOpen(false)}
+                    className="w-full text-left px-3 py-1.5 text-[12px] text-[var(--ink-2)] hover:bg-[var(--surface-2)]"
+                  >
+                    + Add more
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>
