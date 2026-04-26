@@ -26,6 +26,7 @@
  */
 import { withUser } from '@/lib/auth';
 import { getUserApiKey } from '@/lib/keys';
+import { flushLogs, log } from '@/lib/logger';
 import { readPosthogCaptureLlm } from '@/lib/privacy';
 import { getPostHogServer } from '@/lib/posthog';
 import {
@@ -38,6 +39,7 @@ import {
   runIngest,
   type IngestInput,
 } from '@/lib/ingest';
+import { after } from 'next/server';
 import { z } from 'zod';
 
 export const runtime = 'nodejs';
@@ -146,6 +148,22 @@ export const POST = withUser(async ({ userId }, req) => {
   // grouped under one trace in PostHog LLM Analytics.
   const traceId = `ingest_${cryptoRandom()}`;
 
+  log.info('source.ingest.start', {
+    research_id: researchId,
+    user_id: userId,
+    kind: input.kind,
+    has_gemini_key: !!geminiKey,
+    has_openai_key: !!openaiKey,
+    has_tavily_key: !!tavilyKey,
+    trace_id: traceId,
+  });
+  // Always flush logs after the response is sent — guarantees the
+  // BatchLogRecordProcessor doesn't drop the latest batch when Vercel
+  // freezes the lambda.
+  after(async () => {
+    await flushLogs();
+  });
+
   try {
     const result = await runIngest(
       input,
@@ -185,6 +203,15 @@ export const POST = withUser(async ({ userId }, req) => {
       },
     });
 
+    log.info('source.ingest.ok', {
+      research_id: researchId,
+      source_id: row.id,
+      kind: input.kind,
+      words: result.contextDoc.words,
+      latency_ms: Date.now() - start,
+      trace_id: traceId,
+    });
+
     return Response.json({ source: serializeSource(row) }, { status: 201 });
   } catch (err) {
     const code =
@@ -194,6 +221,15 @@ export const POST = withUser(async ({ userId }, req) => {
           ? 'unknown_error'
           : 'unknown_error';
     const message = err instanceof Error ? err.message : 'Ingest failed';
+    log.error('source.ingest.failed', {
+      research_id: researchId,
+      kind: input.kind,
+      error_code: code,
+      error_message: message,
+      provider: err instanceof IngestError ? err.provider : undefined,
+      latency_ms: Date.now() - start,
+      trace_id: traceId,
+    });
     ph.capture({
       distinctId: userId,
       event: 'source_failed',

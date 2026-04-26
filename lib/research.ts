@@ -42,6 +42,7 @@ import {
   type IdeateResult,
 } from './ideate';
 import { getUserApiKey } from './keys';
+import { flushLogs, log } from './logger';
 import { createMessage } from './messages';
 import {
   PeecKeyMissingError,
@@ -183,6 +184,19 @@ export async function runResearchPipeline(
       );
     }
 
+    // One structured line at run start — lets us answer "did the user
+    // actually have OpenAI configured when this run started?" without
+    // re-running the pipeline.
+    log.info('research.run.start', {
+      run_id: runId,
+      research_id: researchId,
+      user_id: clerkUserId,
+      has_openai_key: !!openaiKey,
+      has_gemini_key: !!geminiKey,
+      has_openrouter_key: !!openrouterKey,
+      has_peec_key: !!peecKey,
+    });
+
     const privacyMode = !privacyAllowsCapture;
     const { research } = await getResearchWithContext(clerkUserId, researchId);
     const sources = await listSourcesForResearch(clerkUserId, researchId);
@@ -227,15 +241,55 @@ export async function runResearchPipeline(
       const provider: ProviderName =
         err instanceof IdeateProviderError ? err.provider : 'openai';
       const classified = classifyProviderError(err, provider);
-      // If both providers were tried and both failed, name them both.
+
+      // If both providers were tried and both failed, classify *both*
+      // errors and name each one in the user-facing bubble. Without
+      // this, users only see the Gemini failure and have to guess
+      // what went wrong with their OpenAI key.
       const bothFailed =
         err instanceof IdeateProviderError && err.precedingError !== undefined;
-      const body = bothFailed
-        ? `Ideate failed: OpenAI was unavailable and Gemini also failed — ${classified.message}`
-        : `Ideate failed: ${classified.message}`;
+      let body: string;
+      if (bothFailed) {
+        const ideateErr = err as IdeateProviderError;
+        // `provider` is the *last* attempt (Gemini when both fail) and
+        // `precedingError` carries the OpenAI error. Classify each so
+        // both providers are named with their actual failure mode.
+        const openAiClassified = classifyProviderError(
+          ideateErr.precedingError,
+          'openai',
+        );
+        const geminiClassified = classified;
+        body = `Ideate failed on both providers — OpenAI: ${openAiClassified.message} · Gemini: ${geminiClassified.message}`;
+        log.error('research.ideate.both_failed', {
+          run_id: runId,
+          research_id: researchId,
+          openai_error: openAiClassified.message,
+          openai_code: openAiClassified.code,
+          gemini_error: geminiClassified.message,
+          gemini_code: geminiClassified.code,
+        });
+      } else {
+        body = `Ideate failed: ${classified.message}`;
+        log.error('research.ideate.failed', {
+          run_id: runId,
+          research_id: researchId,
+          provider,
+          error_message: classified.message,
+          error_code: classified.code,
+        });
+      }
       await emitAgentMessage(clerkUserId, researchId, runId, { body });
       throw err;
     }
+
+    log.info('research.ideate.ok', {
+      run_id: runId,
+      research_id: researchId,
+      provider_used: ideate.providerUsed,
+      model_used: ideate.modelUsed,
+      candidate_count: ideate.prompts.length,
+      fallback: ideate.fallbackReason ? true : false,
+    });
 
     const candidates = ideate.prompts;
     if (candidates.length === 0) {
@@ -375,9 +429,19 @@ export async function runResearchPipeline(
     // only persists the run state so the prompts column doesn't show
     // a stale "running" badge forever.
     await failRun(runId).catch((failErr) => {
-      console.error('[research] failed to mark run as failed', failErr);
+      log.error('research.run.fail_persist_failed', {
+        run_id: runId,
+        research_id: researchId,
+        error: failErr,
+      });
     });
     const code = err instanceof Error ? (err.cause as string | undefined) : undefined;
+    log.error('research.run.failed', {
+      run_id: runId,
+      research_id: researchId,
+      error_code: code ?? 'unknown',
+      error_message: err instanceof Error ? err.message : String(err),
+    });
     ph.capture({
       distinctId: clerkUserId,
       event: 'research_run_failed',
@@ -389,6 +453,12 @@ export async function runResearchPipeline(
         $ai_trace_id: traceId,
       },
     });
+  } finally {
+    // Ship any buffered logs to PostHog before this serverless
+    // invocation (the one running the waitUntil background task) is
+    // frozen. Without forceFlush, the BatchLogRecordProcessor may
+    // drop the most recent batch on cold-frozen lambdas.
+    await flushLogs();
   }
 }
 

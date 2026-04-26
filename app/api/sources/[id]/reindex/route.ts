@@ -23,6 +23,7 @@
  */
 import { withUser } from '@/lib/auth';
 import { getUserApiKey } from '@/lib/keys';
+import { flushLogs, log } from '@/lib/logger';
 import { readPosthogCaptureLlm } from '@/lib/privacy';
 import { getPostHogServer } from '@/lib/posthog';
 import { getSource, updateSource } from '@/lib/sources';
@@ -31,6 +32,7 @@ import {
   runIngest,
   type IngestInput,
 } from '@/lib/ingest';
+import { after } from 'next/server';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -93,6 +95,20 @@ export const POST = withUser(
     const start = Date.now();
     const traceId = `reindex_${id}_${Date.now().toString(36)}`;
 
+    log.info('source.reindex.start', {
+      research_id: source.researchId,
+      source_id: id,
+      user_id: userId,
+      kind: source.kind,
+      has_gemini_key: !!geminiKey,
+      has_openai_key: !!openaiKey,
+      has_tavily_key: !!tavilyKey,
+      trace_id: traceId,
+    });
+    after(async () => {
+      await flushLogs();
+    });
+
     try {
       const result = await runIngest(
         input,
@@ -134,6 +150,15 @@ export const POST = withUser(
         },
       });
 
+      log.info('source.reindex.ok', {
+        research_id: source.researchId,
+        source_id: id,
+        kind: source.kind,
+        words: result.contextDoc.words,
+        latency_ms: Date.now() - start,
+        trace_id: traceId,
+      });
+
       return Response.json({
         source: {
           id: updated.id,
@@ -150,6 +175,16 @@ export const POST = withUser(
     } catch (err) {
       const code = err instanceof IngestError ? err.code : 'unknown_error';
       const message = err instanceof Error ? err.message : 'Reindex failed';
+      log.error('source.reindex.failed', {
+        research_id: source.researchId,
+        source_id: id,
+        kind: source.kind,
+        error_code: code,
+        error_message: message,
+        provider: err instanceof IngestError ? err.provider : undefined,
+        latency_ms: Date.now() - start,
+        trace_id: traceId,
+      });
       ph.capture({
         distinctId: userId,
         event: 'source_failed',

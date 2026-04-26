@@ -19,6 +19,7 @@
 import 'server-only';
 import { contextDoc, type ContextDocCallOptions } from '../gemini';
 import { parseDocx } from '../docx';
+import { log } from '../logger';
 import {
   openAIContextDoc,
   type OpenAIIngestInput,
@@ -199,6 +200,8 @@ async function runContextDocWithFallback(
   const hasGemini = !!(keys.geminiKey && keys.geminiKey.length >= 8);
   const hasOpenAI = !!(keys.openaiKey && keys.openaiKey.length >= 8);
 
+  const ingestKind = geminiInput.kind;
+
   // Primary: Gemini Flash (if present)
   if (hasGemini) {
     try {
@@ -216,19 +219,39 @@ async function runContextDocWithFallback(
               text: geminiInput.text,
               contextHint: geminiInput.contextHint,
             };
-      return await contextDoc(keys.geminiKey!, geminiCallInput, ctxOpts);
+      const doc = await contextDoc(keys.geminiKey!, geminiCallInput, ctxOpts);
+      log.info('ingest.context_doc.ok', {
+        provider: 'gemini',
+        kind: ingestKind,
+        fallback: false,
+      });
+      return doc;
     } catch (geminiErr) {
+      const geminiClassified = classifyProviderError(geminiErr, 'gemini');
       if (!hasOpenAI) {
-        const classified = classifyProviderError(geminiErr, 'gemini');
+        log.error('ingest.context_doc.failed', {
+          provider: 'gemini',
+          kind: ingestKind,
+          error_message: geminiClassified.message,
+          error_code: geminiClassified.code,
+          fallback_available: false,
+        });
         throw new IngestError(
-          classified.message,
-          classified.code,
+          geminiClassified.message,
+          geminiClassified.code,
           geminiErr,
-          classified.provider,
-          classified.status,
+          geminiClassified.provider,
+          geminiClassified.status,
         );
       }
       // Fall through to OpenAI fallback.
+      log.warn('ingest.context_doc.fallback', {
+        from_provider: 'gemini',
+        to_provider: 'openai',
+        kind: ingestKind,
+        gemini_error: geminiClassified.message,
+        gemini_code: geminiClassified.code,
+      });
       try {
         const openAiInput: OpenAIIngestInput =
           geminiInput.kind === 'pdf'
@@ -243,20 +266,31 @@ async function runContextDocWithFallback(
                 text: geminiInput.text,
                 contextHint: geminiInput.contextHint,
               };
-        return await openAIContextDoc(keys.openaiKey!, openAiInput, ctxOpts);
+        const doc = await openAIContextDoc(keys.openaiKey!, openAiInput, ctxOpts);
+        log.info('ingest.context_doc.ok', {
+          provider: 'openai',
+          kind: ingestKind,
+          fallback: true,
+        });
+        return doc;
       } catch (openAiErr) {
         // Both failed — surface the OpenAI error since it was the
         // latest. Include the Gemini reason in the message so the
         // user can decide which key is easier to fix.
-        const classified = classifyProviderError(openAiErr, 'openai');
-        const geminiMsg =
-          geminiErr instanceof Error ? geminiErr.message : String(geminiErr);
+        const openAiClassified = classifyProviderError(openAiErr, 'openai');
+        log.error('ingest.context_doc.both_failed', {
+          kind: ingestKind,
+          openai_error: openAiClassified.message,
+          openai_code: openAiClassified.code,
+          gemini_error: geminiClassified.message,
+          gemini_code: geminiClassified.code,
+        });
         throw new IngestError(
-          `${classified.message} (Gemini also failed: ${geminiMsg})`,
-          classified.code,
+          `${openAiClassified.message} (Gemini also failed: ${geminiClassified.message})`,
+          openAiClassified.code,
           openAiErr,
-          classified.provider,
-          classified.status,
+          openAiClassified.provider,
+          openAiClassified.status,
         );
       }
     }
@@ -277,9 +311,22 @@ async function runContextDocWithFallback(
             text: geminiInput.text,
             contextHint: geminiInput.contextHint,
           };
-    return await openAIContextDoc(keys.openaiKey!, openAiInput, ctxOpts);
+    const doc = await openAIContextDoc(keys.openaiKey!, openAiInput, ctxOpts);
+    log.info('ingest.context_doc.ok', {
+      provider: 'openai',
+      kind: ingestKind,
+      fallback: false,
+    });
+    return doc;
   } catch (openAiErr) {
     const classified = classifyProviderError(openAiErr, 'openai');
+    log.error('ingest.context_doc.failed', {
+      provider: 'openai',
+      kind: ingestKind,
+      error_message: classified.message,
+      error_code: classified.code,
+      fallback_available: false,
+    });
     throw new IngestError(
       classified.message,
       classified.code,
