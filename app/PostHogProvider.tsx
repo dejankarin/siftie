@@ -41,9 +41,20 @@ import { useEffect, type ReactNode } from 'react';
 import posthog from 'posthog-js';
 import { PostHogProvider as PHProvider } from 'posthog-js/react';
 
+/**
+ * Subset of PostHog's `bootstrap` option we use. Passed in from
+ * app/layout.tsx via `getServerFlags(userId)` to seed the browser SDK
+ * with the same flag values the server saw — eliminates flag flicker on
+ * the first render after hydration.
+ */
+export interface PosthogBootstrap {
+  distinctID: string;
+  featureFlags: Record<string, string | boolean>;
+}
+
 let initialised = false;
 
-function ensureInit() {
+function ensureInit(bootstrap: PosthogBootstrap | undefined) {
   if (initialised) return;
   if (typeof window === 'undefined') return;
   // Production-only gate. Off-prod we still mount the React provider so
@@ -70,14 +81,25 @@ function ensureInit() {
       maskTextSelector: '[data-private]',
       recordCrossOriginIframes: false,
     },
+    // Bootstrap seeds the SDK with flag values fetched server-side so the
+    // first client-side `useFeatureFlag*` read returns the same answer the
+    // server used during render. Without this we'd get flicker as the SDK
+    // fetches /decide on mount.
+    ...(bootstrap ? { bootstrap } : {}),
   });
   initialised = true;
 }
 
-export function PostHogProvider({ children }: { children: ReactNode }) {
+export function PostHogProvider({
+  children,
+  bootstrap,
+}: {
+  children: ReactNode;
+  bootstrap?: PosthogBootstrap;
+}) {
   useEffect(() => {
-    ensureInit();
-  }, []);
+    ensureInit(bootstrap);
+  }, [bootstrap]);
 
   return <PHProvider client={posthog}>{children}</PHProvider>;
 }

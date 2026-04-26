@@ -56,7 +56,7 @@ import { getPostHogServer } from './posthog';
 import { readPosthogCaptureLlm } from './privacy';
 import { classifyProviderError, type ProviderName } from './provider-errors';
 import {
-  type CouncilDepth,
+  CouncilDepth,
   type FinalPrompt,
   type IdeatePrompt,
 } from './research/schema';
@@ -68,6 +68,7 @@ import {
 } from './runs';
 import { listSourcesForResearch } from './sources';
 import { listMessagesForResearch } from './messages';
+import { FLAG_KEYS, getServerFlag } from './flags';
 import { getProjectIdForResearch, getResearchWithContext } from './workspace';
 
 // ---------------------------------------------------------------------------
@@ -202,6 +203,27 @@ export async function runResearchPipeline(
     const sources = await listSourcesForResearch(clerkUserId, researchId);
     const transcript = await listMessagesForResearch(clerkUserId, researchId);
 
+    // Apply the COUNCIL_DEPTH_OVERRIDE flag if PostHog has it set. Used as
+    // a kill-switch to dial back compute on cost spikes without a redeploy.
+    // When unset (or an unknown value), we fall back to the user's stored
+    // research-level preference.
+    const depthOverrideRaw = await getServerFlag(
+      clerkUserId,
+      FLAG_KEYS.COUNCIL_DEPTH_OVERRIDE,
+    );
+    const parsedOverride = CouncilDepth.safeParse(depthOverrideRaw);
+    const effectiveCouncilDepth: CouncilDepth = parsedOverride.success
+      ? parsedOverride.data
+      : research.councilDepth;
+    if (parsedOverride.success && parsedOverride.data !== research.councilDepth) {
+      log.info('research.council_depth.overridden', {
+        run_id: runId,
+        research_id: researchId,
+        user_choice: research.councilDepth,
+        applied: effectiveCouncilDepth,
+      });
+    }
+
     // Strip prior council bubbles from the transcript we feed into
     // Ideate/Council — they're stale narration, not signal.
     const conversationForLlm = transcript
@@ -212,7 +234,7 @@ export async function runResearchPipeline(
     // Opener bubble
     // -----------------------------------------------------------------
     await emitAgentMessage(clerkUserId, researchId, runId, {
-      body: `Working on it. I'll generate candidate prompts, vet them with the Council (${depthLabel(research.councilDepth)}), then surface the strongest portfolio.`,
+      body: `Working on it. I'll generate candidate prompts, vet them with the Council (${depthLabel(effectiveCouncilDepth)}), then surface the strongest portfolio.`,
     });
 
     // -----------------------------------------------------------------
@@ -382,7 +404,7 @@ export async function runResearchPipeline(
 
     const council = await runCouncil(
       candidates,
-      research.councilDepth,
+      effectiveCouncilDepth,
       {
         apiKey: openrouterKey,
         researchTitle: research.name,
@@ -434,7 +456,8 @@ export async function runResearchPipeline(
         prompt_count: finalPrompts.length,
         candidate_count: candidates.length,
         reviewers_used: council.reviewersUsed,
-        council_depth: research.councilDepth,
+        council_depth: effectiveCouncilDepth,
+        council_depth_user_choice: research.councilDepth,
         peec_skipped: peecSkipped,
         $ai_trace_id: traceId,
       },

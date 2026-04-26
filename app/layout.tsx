@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from 'next';
 import { ClerkProvider } from '@clerk/nextjs';
+import { auth } from '@clerk/nextjs/server';
 import { PostHogProvider } from './PostHogProvider';
 import { PostHogIdentify } from './PostHogIdentify';
+import { getServerFlags } from '@/lib/flags';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -27,7 +29,14 @@ const themeBootstrapScript = `(() => {
   } catch {}
 })();`;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Resolve PostHog feature flags server-side so the browser SDK can
+  // bootstrap with them — eliminates flag flicker between SSR and hydration.
+  // `auth()` returns null userId for anonymous visitors (landing page),
+  // which getServerFlags handles by returning an empty bootstrap.
+  const { userId } = await auth();
+  const bootstrap = userId ? await getServerFlags(userId) : undefined;
+
   return (
     <ClerkProvider>
       <html lang="en" suppressHydrationWarning>
@@ -41,7 +50,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
         </head>
         <body suppressHydrationWarning>
-          <PostHogProvider>
+          <PostHogProvider bootstrap={bootstrap}>
             <PostHogIdentify />
             {children}
           </PostHogProvider>
