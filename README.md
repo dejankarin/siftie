@@ -81,7 +81,7 @@ Other scripts:
 | Source ingestion (fallback) | `gpt-5.4` | OpenAI Platform | Used when Gemini Flash fails / quota. |
 | Interview questions | `gemini-3-flash-preview` | Gemini API | First six gap-attributed questions per research. |
 | **Ideate (primary)** | **`gpt-5.4`** | **OpenAI Platform** | ~24 candidate prompts, structured output via `response_format: json_schema`, reasoning model with `reasoning_effort: 'low'`. |
-| Ideate (fallback) | `gemini-3.1-pro-preview` | Gemini API | `ThinkingLevel.MEDIUM`. Paid tier only (no free tier on Pro 3.1). |
+| Ideate (fallback) | `gemini-3-flash-preview` | Gemini API | `ThinkingLevel.MEDIUM`. |
 | Council reviewers | `openai/gpt-5.4-mini`, `google/gemini-2.5-flash`, `anthropic/claude-haiku-4.5` | OpenRouter | Demo lineup: 3 fast models, one per major vendor — chosen so the live agent feels snappy (~3–5x faster end-to-end vs. an all-frontier lineup) while still proving cross-vendor disagreement. Anonymised seats 1–3. Every run uses Standard depth (all 3 reviewers); no user-facing depth selector. |
 | Council Chair | `openai/gpt-5.4-mini` | OpenRouter | First seat doubles as the synthesis Chair (same family as the Ideate primary), with per-prompt `councilNote`. |
 
