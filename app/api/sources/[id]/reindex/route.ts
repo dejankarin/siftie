@@ -199,6 +199,13 @@ export const POST = withUser(
           message,
         },
       });
+      ph.captureException(err, userId, {
+        route: 'POST /api/sources/[id]/reindex',
+        research_id: source.researchId,
+        source_id: id,
+        kind: source.kind,
+        error_code: code,
+      });
       const status = err instanceof IngestError ? err.status : 500;
       const provider = err instanceof IngestError ? err.provider : undefined;
       return Response.json({ error: code, message, provider }, { status });

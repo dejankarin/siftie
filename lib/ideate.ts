@@ -36,6 +36,7 @@
  */
 import 'server-only';
 import { PostHogGoogleGenAI } from '@posthog/ai/gemini';
+import { ThinkingLevel } from '@google/genai';
 import type { ContextDoc } from './ingest/schema';
 import { generateOpenAIJson, OPENAI_IDEATE_MODEL } from './openai';
 import { getPostHogServer } from './posthog';
@@ -47,12 +48,16 @@ import {
 import { withResilience } from './resilience';
 
 /**
- * Gemini Pro fallback model. `gemini-pro-latest` rolls forward
- * whenever Google ships a new Pro model. If we ever want to pin
- * (e.g. for reproducible council outputs in QA), swap for
- * `gemini-3-pro-preview`.
+ * Gemini Pro fallback model. We pin to the explicit
+ * `gemini-3.1-pro-preview` ID per the Gemini 3 docs — `*-latest`
+ * aliases aren't documented for the 3-series and have caused
+ * routing/quota oddities. Note: `gemini-3.1-pro-preview` has **no
+ * free tier** in the Gemini API (paid only), so the fallback only
+ * works on a paid Gemini key.
+ *
+ * Docs: https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview
  */
-const GEMINI_MODEL = 'gemini-pro-latest';
+const GEMINI_MODEL = 'gemini-3.1-pro-preview';
 
 /** Generous timeout for the Gemini fallback path. */
 const GEMINI_TIMEOUT_MS = 90_000;
@@ -276,7 +281,12 @@ async function runGeminiIdeate(
           systemInstruction: SYSTEM_INSTRUCTION,
           responseMimeType: 'application/json',
           responseJsonSchema: IdeateResponseJsonSchema,
-          temperature: 0.7,
+          // Gemini 3 docs strongly recommend keeping temperature at the
+          // default (1.0). Setting it lower can cause looping or
+          // degraded performance on complex reasoning tasks.
+          // `ThinkingLevel.MEDIUM` keeps the latency reasonable while
+          // still giving the model room to plan a 24-prompt portfolio.
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
         },
         posthogDistinctId: opts.posthogDistinctId,
         posthogTraceId: opts.posthogTraceId,

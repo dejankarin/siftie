@@ -462,6 +462,13 @@ export async function runResearchPipeline(
         $ai_trace_id: traceId,
       },
     });
+    ph.captureException(err, clerkUserId, {
+      route: 'lib/research:runResearch',
+      research_id: researchId,
+      run_id: runId,
+      error_code: code ?? 'unknown',
+      $ai_trace_id: traceId,
+    });
   } finally {
     // Ship any buffered logs to PostHog before this serverless
     // invocation (the one running the waitUntil background task) is

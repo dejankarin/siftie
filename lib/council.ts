@@ -197,7 +197,7 @@ export async function runCouncil(
   });
 
   // Pick the Chair model: prefer the strongest reasoning model
-  // available. We use the first model in COUNCIL_MODELS (gpt-5.5) by
+  // available. We use the first model in COUNCIL_MODELS (gpt-5.4) by
   // convention. This is OK to leak in the system prompt — there is no
   // peer above the Chair to defer to.
   const chairModel = COUNCIL_MODELS[0];

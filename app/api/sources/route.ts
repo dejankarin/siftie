@@ -243,6 +243,16 @@ export const POST = withUser(async ({ userId }, req) => {
         message,
       },
     });
+    // Forward to PostHog Error tracking for dedup + alerting. The
+    // `source_failed` event above is the business funnel; this is the
+    // raw exception with its stack — they coexist.
+    ph.captureException(err, userId, {
+      route: 'POST /api/sources',
+      research_id: researchId,
+      kind: input.kind,
+      error_code: code,
+      $ai_trace_id: traceId,
+    });
     const status = err instanceof IngestError ? err.status : 500;
     const provider = err instanceof IngestError ? err.provider : undefined;
     return Response.json({ error: code, message, provider }, { status });

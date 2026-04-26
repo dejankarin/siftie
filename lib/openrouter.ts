@@ -43,8 +43,16 @@ import { withResilience } from './resilience';
  * "standard" depth. See `lib/council.ts` for selection.
  */
 export const COUNCIL_MODELS = [
-  'openai/gpt-5.5',
-  'google/gemini-3-pro-preview',
+  // gpt-5.4 over gpt-5.5: 5.4 is the current stable frontier reasoning
+  // model; we picked it for Ideate too so the Council Chair runs the
+  // exact model the user has paid quota for.
+  // https://developers.openai.com/api/docs/models/gpt-5.4
+  'openai/gpt-5.4',
+  // Pinned to `gemini-3.1-pro-preview` per Google's current canonical
+  // naming for the Pro tier. OpenRouter exposes this exact ID.
+  // https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview
+  // https://openrouter.ai/google/gemini-3.1-pro-preview
+  'google/gemini-3.1-pro-preview',
   'anthropic/claude-opus-4.5',
   'x-ai/grok-4',
 ] as const;
@@ -55,7 +63,7 @@ const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 /**
  * Hard timeout per call. Council reviewers crunch a lot of context
  * (sources + interview + ~24 prompts) and reasoning models like
- * gpt-5.5 / grok-4 are slow, so we budget generously.
+ * gpt-5.4 / grok-4 are slow, so we budget generously.
  */
 const TIMEOUT_MS = 90_000;
 
@@ -71,7 +79,7 @@ export interface OpenRouterCallOptions {
 }
 
 export interface JsonGenerationParams {
-  /** OpenRouter model id, e.g. "openai/gpt-5.5". */
+  /** OpenRouter model id, e.g. "openai/gpt-5.4". */
   model: string;
   /** System message that frames the role + rules. */
   system: string;
@@ -85,10 +93,42 @@ export interface JsonGenerationParams {
   schema: Record<string, unknown>;
   /** Schema name surfaced in the response_format payload. Helps debugging. */
   schemaName: string;
-  /** 0-2; defaults to 0.4 (modest creativity for refinement, not for verdicts). */
+  /**
+   * 0-2; defaults to 0.4 (modest creativity for refinement, not for
+   * verdicts). **Ignored for reasoning models** (gpt-5.x, o-series,
+   * gemini-3.x) — those reject non-default temperatures (OpenAI) or
+   * loop with low temps (Gemini 3). Use `reasoningEffort` instead.
+   */
   temperature?: number;
   /** Output token cap. Defaults to 2000. */
   maxTokens?: number;
+  /**
+   * Reasoning effort for reasoning models. Maps to OpenAI's
+   * `reasoning_effort` and Gemini's `thinking_level` via OpenRouter's
+   * unified parameter handling. Ignored for non-reasoning models.
+   * Defaults to `'low'` — Council reviewers/chair are doing synthesis
+   * over already-prepared inputs, so low effort is plenty.
+   */
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high';
+}
+
+/**
+ * True if the OpenRouter model id refers to a reasoning model. We
+ * branch on this to use `max_completion_tokens` + `reasoning_effort`
+ * instead of `max_tokens` + `temperature`, mirroring how the direct
+ * OpenAI client (`lib/openai.ts`) handles GPT-5.x.
+ *
+ * Covers:
+ *   - `openai/gpt-5.x` (gpt-5.4, gpt-5.5)
+ *   - `openai/o[1-9]…` (o1, o3, o3-mini, etc.)
+ *   - `google/gemini-3.x` (gemini-3-flash-preview, gemini-3.1-pro-preview)
+ */
+function isReasoningModel(modelId: string): boolean {
+  return (
+    /^openai\/gpt-5(\.|-|$)/i.test(modelId) ||
+    /^openai\/o[1-9]/i.test(modelId) ||
+    /^google\/gemini-3(\.|-|$)/i.test(modelId)
+  );
 }
 
 /**
@@ -123,40 +163,55 @@ export async function generateJson(
     },
   });
 
+  // Build the chat-completion body. Reasoning models (OpenAI gpt-5.x /
+  // o-series, Google gemini-3.x via OpenRouter) reject `temperature`
+  // (OpenAI) or loop on low temps (Gemini 3), and they expect
+  // `max_completion_tokens` + `reasoning_effort` instead of
+  // `max_tokens` + `temperature`. Non-reasoning models (Claude, Grok)
+  // keep the classic shape so we don't lose the diversity lever the
+  // Council relies on across reviewers.
+  const reasoning = isReasoningModel(params.model);
+  const body: Record<string, unknown> = {
+    model: params.model,
+    messages: [
+      { role: 'system', content: params.system },
+      { role: 'user', content: params.user },
+    ],
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: params.schemaName,
+        // strict: false because (a) some council schemas have
+        // optional fields like Chair's `text` rewrite, which OpenAI-
+        // strict mode forbids, and (b) OpenRouter routes to many
+        // providers with varying json_schema support. We Zod-
+        // validate the response at the call site anyway.
+        strict: false,
+        schema: params.schema,
+      },
+    },
+    // PostHog instrumentation params — these get stripped from the
+    // outbound HTTP body by the wrapper.
+    posthogDistinctId: opts.posthogDistinctId,
+    posthogTraceId: opts.posthogTraceId,
+    posthogPrivacyMode: opts.posthogPrivacyMode,
+    posthogProperties: {
+      feature: 'council',
+      model_id: params.model,
+      reasoning_model: reasoning,
+      ...opts.posthogProperties,
+    },
+  };
+  if (reasoning) {
+    body.max_completion_tokens = params.maxTokens ?? 2000;
+    body.reasoning_effort = params.reasoningEffort ?? 'low';
+  } else {
+    body.max_tokens = params.maxTokens ?? 2000;
+    body.temperature = params.temperature ?? 0.4;
+  }
+
   const completion = await withResilience(
-    () =>
-      client.chat.completions.create({
-        model: params.model,
-        messages: [
-          { role: 'system', content: params.system },
-          { role: 'user', content: params.user },
-        ],
-        temperature: params.temperature ?? 0.4,
-        max_tokens: params.maxTokens ?? 2000,
-        response_format: {
-          type: 'json_schema',
-          json_schema: {
-            name: params.schemaName,
-            // strict: false because (a) some council schemas have
-            // optional fields like Chair's `text` rewrite, which OpenAI-
-            // strict mode forbids, and (b) OpenRouter routes to many
-            // providers with varying json_schema support. We Zod-
-            // validate the response at the call site anyway.
-            strict: false,
-            schema: params.schema,
-          },
-        },
-        // PostHog instrumentation params — these get stripped from the
-        // outbound HTTP body by the wrapper.
-        posthogDistinctId: opts.posthogDistinctId,
-        posthogTraceId: opts.posthogTraceId,
-        posthogPrivacyMode: opts.posthogPrivacyMode,
-        posthogProperties: {
-          feature: 'council',
-          model_id: params.model,
-          ...opts.posthogProperties,
-        },
-      }),
+    () => client.chat.completions.create(body as any),
     {
       timeoutMs: TIMEOUT_MS,
       retries: 2,
@@ -164,9 +219,15 @@ export async function generateJson(
       maxTimeoutMs: 4_000,
       shouldAbort: (err) => {
         const msg = err instanceof Error ? err.message : String(err ?? '');
-        // Stop retrying on auth, quota, and "model not found" — none of
-        // those will fix themselves with another attempt.
-        return /401|403|404|invalid_api_key|insufficient_quota|model_not_found/i.test(
+        const status =
+          err && typeof err === 'object' && 'status' in err
+            ? Number((err as { status?: unknown }).status)
+            : NaN;
+        // Stop retrying on auth, quota, "model not found", and
+        // unsupported-parameter errors — none of those will fix
+        // themselves with another attempt.
+        if ([400, 401, 403, 404, 429].includes(status)) return true;
+        return /401|403|404|invalid_api_key|insufficient_quota|model_not_found|unsupported_value|unsupported_parameter|invalid_request_error/i.test(
           msg,
         );
       },

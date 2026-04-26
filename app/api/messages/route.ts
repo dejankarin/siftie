@@ -180,6 +180,12 @@ export const POST = withUser(async ({ userId }, req) => {
         message: classified.message,
       },
     });
+    ph.captureException(err, userId, {
+      route: 'POST /api/messages',
+      research_id: researchId,
+      error_code: classified.code,
+      $ai_trace_id: traceId,
+    });
     // Still return the user message so the chat reflects what they sent;
     // include the warning so the client can surface a toast.
     return Response.json(

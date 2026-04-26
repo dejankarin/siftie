@@ -57,7 +57,11 @@ export const loggerProvider = new LoggerProvider({
 });
 
 export function register() {
-  if (process.env.NEXT_RUNTIME === 'nodejs' && POSTHOG_TOKEN) {
+  // Production-only: preview deploys + local dev should not ship logs to
+  // the production PostHog project. Mirrors the gates in
+  // app/PostHogProvider.tsx and lib/posthog.ts.
+  const isProd = process.env.VERCEL_ENV === 'production';
+  if (process.env.NEXT_RUNTIME === 'nodejs' && POSTHOG_TOKEN && isProd) {
     logs.setGlobalLoggerProvider(loggerProvider);
   }
 }

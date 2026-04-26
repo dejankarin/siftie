@@ -37,12 +37,16 @@
  */
 import 'server-only';
 import { PostHogGoogleGenAI } from '@posthog/ai/gemini';
+import { ThinkingLevel } from '@google/genai';
 import { z } from 'zod';
 import type { ContextDoc } from './ingest/schema';
 import { getPostHogServer } from './posthog';
 import { withResilience } from './resilience';
 
-const GEMINI_MODEL = 'gemini-flash-latest';
+// Pinned to the documented Gemini 3 Flash preview ID. `*-latest`
+// aliases aren't first-class in the 3-series. Free-tier eligible.
+// Docs: https://ai.google.dev/gemini-api/docs/gemini-3
+const GEMINI_MODEL = 'gemini-3-flash-preview';
 const TIMEOUT_MS = 60_000;
 const QUESTION_COUNT = 6;
 
@@ -128,7 +132,11 @@ export async function generateInterviewQuestions(
           systemInstruction: SYSTEM_INSTRUCTION,
           responseMimeType: 'application/json',
           responseJsonSchema: ResponseJsonSchema,
-          temperature: 0.4,
+          // Gemini 3 docs strongly recommend keeping temperature at
+          // its 1.0 default. `ThinkingLevel.LOW` keeps interview
+          // generation under ~5s while still producing coherent
+          // gap-attributed questions.
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         },
         posthogDistinctId: opts.posthogDistinctId,
         posthogTraceId: opts.posthogTraceId,

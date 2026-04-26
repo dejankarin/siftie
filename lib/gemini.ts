@@ -30,16 +30,21 @@
  */
 import 'server-only';
 import { PostHogGoogleGenAI } from '@posthog/ai/gemini';
+import { ThinkingLevel } from '@google/genai';
 import { ContextDoc, ContextDocJsonSchema } from './ingest/schema';
 import { getPostHogServer } from './posthog';
 import { withResilience } from './resilience';
 
 /**
- * Model used for every ContextDoc generation. We pin to a Flash model so
- * cost stays trivial (~$0.001 per source). If Google ships a cheaper
- * tier later we can flip this in one place.
+ * Model used for every ContextDoc generation. We pin to the explicit
+ * `gemini-3-flash-preview` ID — Pro-level intelligence at Flash
+ * speed/price (~$0.50 input / $3 output per 1M tokens), with a free
+ * tier in the Gemini API. Per the Gemini 3 docs, `*-latest` aliases
+ * aren't first-class in the 3-series so we pin the explicit preview.
+ *
+ * Docs: https://ai.google.dev/gemini-api/docs/gemini-3
  */
-const GEMINI_MODEL = 'gemini-flash-latest';
+const GEMINI_MODEL = 'gemini-3-flash-preview';
 
 /**
  * Hard timeout per call. 60s is enough for a ~50-page PDF on Flash;
@@ -114,7 +119,10 @@ export async function contextDoc(
           systemInstruction: SYSTEM_INSTRUCTION,
           responseMimeType: 'application/json',
           responseJsonSchema: ContextDocJsonSchema,
-          temperature: 0.2,
+          // Gemini 3 docs strongly recommend keeping temperature at
+          // the 1.0 default. `ThinkingLevel.LOW` is plenty for
+          // schema-bound extraction and keeps ingest snappy.
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         },
         posthogDistinctId: opts.posthogDistinctId,
         posthogTraceId: opts.posthogTraceId,
