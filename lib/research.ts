@@ -265,8 +265,15 @@ export async function runResearchPipeline(
           research_id: researchId,
           openai_error: openAiClassified.message,
           openai_code: openAiClassified.code,
+          // Raw SDK message (truncated) so we can debug the catch-all
+          // `provider_failed` classification when it triggers — without
+          // this we end up logging "OpenAI request failed" with no clue
+          // *why* it failed (rate limit? unsupported param? schema?).
+          openai_raw: truncateForLog(extractRawMessage(ideateErr.precedingError)),
+          openai_status: extractStatus(ideateErr.precedingError),
           gemini_error: geminiClassified.message,
           gemini_code: geminiClassified.code,
+          gemini_raw: truncateForLog(extractRawMessage(err)),
         });
       } else {
         body = `Ideate failed: ${classified.message}`;
@@ -276,6 +283,8 @@ export async function runResearchPipeline(
           provider,
           error_message: classified.message,
           error_code: classified.code,
+          error_raw: truncateForLog(extractRawMessage(err)),
+          error_status: extractStatus(err),
         });
       }
       await emitAgentMessage(clerkUserId, researchId, runId, { body });
@@ -666,4 +675,49 @@ function researchError(code: string, message: string): Error {
 
 function cryptoRandom(): string {
   return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+}
+
+/**
+ * Best-effort raw message extraction for diagnostics. Provider SDKs
+ * surface different shapes:
+ *   - OpenAI APIError → `err.message` like "400 Unsupported value: ...".
+ *     The richer body lives on `err.error?.message`.
+ *   - Gemini @google/genai → `err.message` is a JSON blob.
+ *   - Anything else → coerce to string.
+ *
+ * We prefer `err.error.message` when present (OpenAI's nicer body)
+ * and fall back to `err.message`.
+ */
+function extractRawMessage(err: unknown): string {
+  if (!err) return '';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const apiErr = err as any;
+  if (apiErr && typeof apiErr === 'object') {
+    if (apiErr.error && typeof apiErr.error.message === 'string') {
+      return apiErr.error.message;
+    }
+    if (typeof apiErr.message === 'string') {
+      return apiErr.message;
+    }
+  }
+  return String(err);
+}
+
+/** Pull the HTTP status off an OpenAI APIError-shaped object, if present. */
+function extractStatus(err: unknown): number | undefined {
+  if (!err || typeof err !== 'object') return undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const status = (err as any).status;
+  return typeof status === 'number' ? status : undefined;
+}
+
+/**
+ * Cap log attribute values so a 50KB Gemini quota dump doesn't bloat
+ * every log row. 1KB is enough to read the human message + a snippet
+ * of the JSON envelope; the full payload is in `openai.call.failed`
+ * from the underlying call site if we ever need it.
+ */
+function truncateForLog(s: string, max = 1000): string {
+  if (!s) return '';
+  return s.length > max ? `${s.slice(0, max)}…` : s;
 }

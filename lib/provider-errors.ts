@@ -29,11 +29,19 @@ export function classifyProviderError(
   provider: ProviderName,
 ): ClassifiedProviderError {
   const raw = err instanceof Error ? err.message : String(err ?? '');
-  const parsed = parseProviderErrorJson(raw);
-  const message = parsed?.message ?? raw;
-  const statusText = parsed?.status ?? '';
-  const httpCode = parsed?.code;
-  const combined = `${httpCode ?? ''} ${statusText} ${message}`.toLowerCase();
+
+  // Try the Gemini-style JSON envelope first ({"error":{...}}). When
+  // the SDK doesn't pre-stringify (OpenAI Node SDK throws a typed
+  // APIError instead), pull the same fields off the live object so
+  // both shapes converge into one set of variables.
+  const parsedJson = parseProviderErrorJson(raw);
+  const fromObject = extractFromErrorObject(err);
+  const message = parsedJson?.message ?? fromObject?.message ?? raw;
+  const statusText = parsedJson?.status ?? fromObject?.type ?? '';
+  const httpCode = parsedJson?.code ?? fromObject?.status;
+  const errCode = fromObject?.code ?? '';
+  const combined =
+    `${httpCode ?? ''} ${statusText} ${errCode} ${message}`.toLowerCase();
 
   if (
     httpCode === 429 ||
@@ -67,12 +75,61 @@ export function classifyProviderError(
     };
   }
 
+  // Generic fallback. Prefer the *real* provider message (truncated)
+  // over the opaque "request failed" — when this code path triggers,
+  // the message is almost always the most informative thing we have
+  // (e.g. "Unsupported value: 'temperature' does not support 0.7…").
+  // Without this, callers see "OpenAI request failed. Please try
+  // again." for what is actually a deterministic 400 that retrying
+  // will never fix.
+  const detail = friendlyDetail(message);
   return {
     code: 'provider_failed',
     provider,
-    message: `${providerLabel(provider)} request failed. Please try again.`,
+    message: detail
+      ? `${providerLabel(provider)} request failed: ${detail}`
+      : `${providerLabel(provider)} request failed. Please try again.`,
     status: 502,
   };
+}
+
+/**
+ * Pull the few fields we care about off a typed SDK error object.
+ * Mirrors OpenAI's `APIError` (`status`, `code`, `type`, `message`,
+ * `error.message`) but is shape-tolerant so it also works with raw
+ * `Error` objects that just happen to have the same fields.
+ */
+function extractFromErrorObject(
+  err: unknown,
+): { status?: number; code?: string; type?: string; message?: string } | null {
+  if (!err || typeof err !== 'object') return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const e = err as any;
+  return {
+    status: typeof e.status === 'number' ? e.status : undefined,
+    code: typeof e.code === 'string' ? e.code : undefined,
+    type: typeof e.type === 'string' ? e.type : undefined,
+    message:
+      typeof e.error?.message === 'string'
+        ? e.error.message
+        : typeof e.message === 'string'
+          ? e.message
+          : undefined,
+  };
+}
+
+/**
+ * Trim the raw SDK message to something a user can read in a chat
+ * bubble. Drops the leading `<status> ` prefix the OpenAI SDK adds
+ * (e.g. "400 Unsupported value: ..."), caps length, and strips
+ * trailing whitespace.
+ */
+function friendlyDetail(message: string): string {
+  if (!message) return '';
+  let s = message.trim();
+  s = s.replace(/^\d{3}\s+/, '');
+  if (s.length > 300) s = `${s.slice(0, 300)}…`;
+  return s;
 }
 
 function providerLabel(provider: ProviderName): string {

@@ -33,6 +33,7 @@
 import 'server-only';
 import { OpenAI as PostHogOpenAI } from '@posthog/ai/openai';
 import { ContextDoc, ContextDocJsonSchema } from './ingest/schema';
+import { log } from './logger';
 import { getPostHogServer } from './posthog';
 import { withResilience } from './resilience';
 
@@ -93,10 +94,41 @@ export interface OpenAIJsonGenerationParams {
   schema: Record<string, unknown>;
   /** Schema name surfaced in the response_format payload. Helps debugging. */
   schemaName: string;
-  /** 0-2; defaults to 0.7 (Ideate benefits from creative diversity). */
+  /**
+   * 0–2; defaults to 0.7 for non-reasoning models. **Ignored for
+   * reasoning models** (gpt-5.x, o-series) which only support the
+   * default value of 1 — passing a different value would 400 the call.
+   */
   temperature?: number;
-  /** Output token cap. Defaults to 4000 — enough for ~24 prompt objects. */
+  /**
+   * Output token cap. Defaults to 4000. For reasoning models this is
+   * sent as `max_completion_tokens` (which counts reasoning + visible
+   * tokens). For older chat models it's sent as `max_tokens`.
+   */
   maxTokens?: number;
+  /**
+   * Reasoning effort for reasoning models (gpt-5.x, o-series). Lower
+   * effort → faster + cheaper response. We default to `'low'` because
+   * Ideate / Ingest are short, schema-bound tasks where deeper
+   * reasoning rarely improves output but adds 5-30s of latency.
+   * Ignored for non-reasoning models.
+   */
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+}
+
+/**
+ * True if the model id refers to a reasoning model (gpt-5.x family or
+ * the o-series). Reasoning models have stricter parameter rules:
+ *   - reject `temperature` other than the default of 1
+ *   - require `max_completion_tokens` instead of `max_tokens`
+ *   - support `reasoning_effort`
+ *
+ * Kept conservative — anything we don't recognise is treated as a
+ * regular chat model so we don't accidentally drop temperature on
+ * a model that does support it.
+ */
+function isReasoningModel(modelId: string): boolean {
+  return /^(gpt-5|o[1-9])/i.test(modelId);
 }
 
 /**
@@ -125,61 +157,114 @@ export async function generateOpenAIJson(
   });
 
   const model = params.model ?? OPENAI_IDEATE_MODEL;
+  const reasoning = isReasoningModel(model);
 
-  // The OpenAI SDK accepts either a string or a content-parts array
-  // for `content`, but the union types get noisy when `file` parts
-  // (added in 2025) are involved. Cast at the boundary so the rest of
-  // our code keeps the cleaner narrowed `OpenAIUserContentPart` type.
-  const completion = await withResilience(
-    () =>
-      client.chat.completions.create({
-        model,
-        messages: [
-          { role: 'system', content: params.system },
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          { role: 'user', content: params.user as any },
-        ],
-        temperature: params.temperature ?? 0.7,
-        max_tokens: params.maxTokens ?? 4000,
-        response_format: {
-          type: 'json_schema',
-          json_schema: {
-            name: params.schemaName,
-            // strict: false because Ideate's optional fields (e.g.
-            // candidate notes/strategy) are easier to evolve without a
-            // strict schema lock. We Zod-validate the response anyway.
-            strict: false,
-            schema: params.schema,
-          },
-        },
-        // PostHog instrumentation params — stripped from the outbound
-        // HTTP body by the wrapper.
-        posthogDistinctId: opts.posthogDistinctId,
-        posthogTraceId: opts.posthogTraceId,
-        posthogPrivacyMode: opts.posthogPrivacyMode,
-        posthogProperties: {
-          feature: 'ideate',
-          model_id: model,
-          provider: 'openai',
-          ...opts.posthogProperties,
-        },
-      }),
-    {
-      timeoutMs: TIMEOUT_MS,
-      retries: 2,
-      minTimeoutMs: 1_000,
-      maxTimeoutMs: 4_000,
-      shouldAbort: (err) => {
-        const msg = err instanceof Error ? err.message : String(err ?? '');
-        // Stop retrying on auth, quota, and "model not found" — those
-        // won't fix themselves on retry, and we want to fall back to
-        // Gemini *fast* in the Ideate orchestrator.
-        return /401|403|404|invalid_api_key|insufficient_quota|model_not_found/i.test(
-          msg,
-        );
+  // Build the completion body. Reasoning models (gpt-5.x, o-series)
+  // and chat models share most of the schema but diverge on three
+  // fields:
+  //   - temperature  : reasoning models reject anything but the
+  //                    default; chat models default to 0.7.
+  //   - token cap    : reasoning uses `max_completion_tokens`,
+  //                    chat uses `max_tokens` (deprecated for newer
+  //                    reasoning models).
+  //   - reasoning_effort : reasoning-only knob; we default to 'low'
+  //                    because Ideate and Ingest are short, schema-
+  //                    bound tasks where deeper reasoning adds 5-30s
+  //                    of latency without measurably better output.
+  //
+  // Mistakes here are *silent in our classifier* — OpenAI returns a
+  // 400 "Unsupported value" / "Unsupported parameter" which our
+  // generic provider-error fallback masks as "OpenAI request failed".
+  // Keep this branch tight.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body: Record<string, any> = {
+    model,
+    messages: [
+      { role: 'system', content: params.system },
+      // The OpenAI SDK accepts either a string or a content-parts array
+      // for `content`, but the union types get noisy when `file` parts
+      // (added in 2025) are involved. Cast at the boundary so the rest
+      // of our code keeps the cleaner `OpenAIUserContentPart` type.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { role: 'user', content: params.user as any },
+    ],
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: params.schemaName,
+        // strict: false because Ideate's optional fields (e.g.
+        // candidate notes/strategy) are easier to evolve without a
+        // strict schema lock. We Zod-validate the response anyway.
+        strict: false,
+        schema: params.schema,
       },
     },
-  );
+    // PostHog instrumentation params — stripped from the outbound
+    // HTTP body by the wrapper.
+    posthogDistinctId: opts.posthogDistinctId,
+    posthogTraceId: opts.posthogTraceId,
+    posthogPrivacyMode: opts.posthogPrivacyMode,
+    posthogProperties: {
+      feature: 'ideate',
+      model_id: model,
+      provider: 'openai',
+      reasoning_model: reasoning,
+      ...opts.posthogProperties,
+    },
+  };
+
+  if (reasoning) {
+    body.max_completion_tokens = params.maxTokens ?? 4000;
+    body.reasoning_effort = params.reasoningEffort ?? 'low';
+  } else {
+    body.max_tokens = params.maxTokens ?? 4000;
+    body.temperature = params.temperature ?? 0.7;
+  }
+
+  let completion;
+  try {
+    completion = await withResilience(
+      // The completion body has a discriminated union type that varies
+      // by reasoning vs. chat model. We've already enforced the right
+      // params above, so cast at the boundary rather than thread two
+      // typed paths through the SDK overloads.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => client.chat.completions.create(body as any),
+      {
+        timeoutMs: TIMEOUT_MS,
+        retries: 2,
+        minTimeoutMs: 1_000,
+        maxTimeoutMs: 4_000,
+        shouldAbort: (err) => {
+          const msg = err instanceof Error ? err.message : String(err ?? '');
+          // Bail out fast on any 4xx (auth, quota, missing model,
+          // unsupported parameter, schema rejection). None of these get
+          // better with another try, and the Ideate orchestrator falls
+          // back to Gemini in milliseconds when we abort here.
+          return /\b(400|401|403|404|429)\b|invalid_api_key|insufficient_quota|model_not_found|unsupported_value|unsupported_parameter|invalid_request_error/i.test(
+            msg,
+          );
+        },
+      },
+    );
+  } catch (err) {
+    // Surface the *raw* SDK error (status + code + message) into the
+    // logs so we can diagnose it from PostHog without re-running. The
+    // user-facing classifier deliberately scrubs detail to avoid
+    // leaking internal noise; this is the diagnostic pipe.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const apiErr = err as any;
+    log.error('openai.call.failed', {
+      model,
+      reasoning_model: reasoning,
+      status: typeof apiErr?.status === 'number' ? apiErr.status : undefined,
+      code: typeof apiErr?.code === 'string' ? apiErr.code : undefined,
+      type: typeof apiErr?.type === 'string' ? apiErr.type : undefined,
+      param: typeof apiErr?.param === 'string' ? apiErr.param : undefined,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 
   const text = completion.choices?.[0]?.message?.content;
   if (typeof text !== 'string' || text.length === 0) {
