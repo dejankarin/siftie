@@ -413,7 +413,7 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                 runStatus={ws.activeResearch.runStatus}
                 latestRunId={latestRunId}
                 onSendChatMessage={sendMessage}
-                onTestPrompt={ws.testPrompt}
+                onRefreshHits={ws.refreshHits}
               />
             </div>
           </div>
@@ -471,7 +471,7 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
                   runStatus={ws.activeResearch.runStatus}
                   latestRunId={latestRunId}
                   onSendChatMessage={sendMessage}
-                  onTestPrompt={ws.testPrompt}
+                  onRefreshHits={ws.refreshHits}
                 />
               </div>
             )}

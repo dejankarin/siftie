@@ -189,13 +189,17 @@ export interface UseWorkspaceResult {
    */
   cancelResearch: () => Promise<void>;
   /**
-   * Re-run the Peec brand-baseline lookup for one prompt and replace
-   * its row in the active research's portfolio. Resolves with the
-   * updated prompt so callers can compare before/after hits for
-   * analytics. Throws on missing key / Peec failure with `code` set to
-   * a stable short string.
+   * Re-run the Peec brand-baseline lookup for the active research's
+   * latest run and write the freshly-fetched `hits` / `totalChannels`
+   * onto **every** prompt in the run. Peec's baseline is portfolio-
+   * wide (it doesn't index our prompt ids), so updating every prompt
+   * with the same number is the only correct semantics. Resolves with
+   * the full updated prompts array so callers can splice locally and
+   * sub-second-update the UI ahead of the Realtime echo. Throws on
+   * missing key / Peec failure with `code` set to a stable short
+   * string.
    */
-  testPrompt: (promptId: string) => Promise<PortfolioPrompt>;
+  refreshHits: () => Promise<PortfolioPrompt[]>;
   /**
    * True while the active research has an agent reply in flight. Drives
    * the typing-bubble in `<ChatColumn />`.
@@ -1587,61 +1591,63 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
   }, []);
 
   /**
-   * Per-prompt Test (Session 7).
+   * Refresh hits for the entire portfolio of the active research's
+   * latest run.
    *
-   * Hits POST /api/prompts/[promptId]/test with the active research's
-   * latest run id. The route refetches the Peec brand baseline and
-   * returns a new FinalPrompt; we splice it into local state so the
-   * card updates instantly. The Realtime UPDATE on `runs.prompts`
-   * follows shortly after — same payload, deduped by id — and would
-   * arrive eventually anyway, but doing the local swap means the
-   * tester gets sub-second feedback instead of waiting on the
-   * subscription round-trip.
+   * Hits POST /api/runs/[runId]/refresh-hits. The server re-fetches
+   * the Peec brand-mention baseline once and writes the same new
+   * `hits` / `totalChannels` onto every prompt in the run. We splice
+   * the returned prompts array into local state so the column updates
+   * instantly; the Realtime UPDATE on `runs.prompts` follows shortly
+   * after — same payload, deduped by id — and would arrive eventually
+   * anyway, but the local swap gives sub-second feedback.
    */
-  const testPrompt = useCallback(async (promptId: string): Promise<PortfolioPrompt> => {
+  const refreshHits = useCallback(async (): Promise<PortfolioPrompt[]> => {
     const target = stateRef.current?.researches.find(
       (r) => r.id === stateRef.current?.activeResearchId,
     );
     const runId = target?.latestRunId;
     if (!target || !runId) {
-      const err: Error & { code?: string } = new Error('No completed run to test against.');
+      const err: Error & { code?: string } = new Error(
+        'No completed run to refresh against.',
+      );
       err.code = 'no_run';
       throw err;
     }
-    const res = await fetch(`/api/prompts/${encodeURIComponent(promptId)}/test`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ runId }),
-    });
+    const res = await fetch(
+      `/api/runs/${encodeURIComponent(runId)}/refresh-hits`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
     const body = (await res.json().catch(() => ({}))) as {
-      prompt?: PortfolioPrompt;
+      prompts?: PortfolioPrompt[];
       error?: string;
       message?: string;
     };
     if (!res.ok) {
       const err: Error & { code?: string } = new Error(
-        body.message ?? `Test failed (${res.status})`,
+        body.message ?? `Refresh failed (${res.status})`,
       );
-      err.code = body.error ?? 'test_failed';
+      err.code = body.error ?? 'refresh_failed';
       throw err;
     }
-    if (!body.prompt) {
-      const err: Error & { code?: string } = new Error('Test returned no prompt.');
+    if (!Array.isArray(body.prompts)) {
+      const err: Error & { code?: string } = new Error(
+        'Refresh returned no prompts.',
+      );
       err.code = 'invalid_response';
       throw err;
     }
-    const updated = body.prompt;
+    const updated = body.prompts;
     setState((s) => {
       if (!s) return s;
       return {
         ...s,
-        researches: s.researches.map((r) => {
-          if (r.id !== target.id) return r;
-          return {
-            ...r,
-            prompts: r.prompts.map((p) => (p.id === updated.id ? updated : p)),
-          };
-        }),
+        researches: s.researches.map((r) =>
+          r.id !== target.id ? r : { ...r, prompts: updated },
+        ),
       };
     });
     return updated;
@@ -1672,7 +1678,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
     sendMessage,
     runResearch,
     cancelResearch,
-    testPrompt,
+    refreshHits,
     isTyping: pendingMessageResearchIds.has(state.activeResearchId),
   };
 }

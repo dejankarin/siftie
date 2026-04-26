@@ -8,7 +8,7 @@ import {
   type MouseEvent,
 } from 'react';
 import posthog from 'posthog-js';
-import { ChevronDown, FileDown, Sparkles, X } from 'lucide-react';
+import { ChevronDown, FileDown, RefreshCw, Sparkles, X } from 'lucide-react';
 import { PROMPT_FILTERS } from '../data/mock';
 import type { PortfolioPrompt, PromptCluster, PromptFilter, RunChannel } from '../types';
 
@@ -100,22 +100,18 @@ function HitsBar({
 function PromptCard({
   prompt,
   onCopy,
-  onTest,
   isNew,
   channels,
   peecSkipped,
   position,
-  testing,
 }: {
   prompt: PortfolioPrompt;
   onCopy: (prompt: PortfolioPrompt, position: number) => void;
-  onTest?: (prompt: PortfolioPrompt) => void | Promise<void>;
   isNew: boolean;
   channels: RunChannel[];
   peecSkipped: boolean;
   /** 1-based index inside the visible filtered/sorted list. */
   position: number;
-  testing: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const [showNote, setShowNote] = useState(false);
@@ -125,12 +121,6 @@ function PromptCard({
     onCopy(prompt, position);
     setCopied(true);
     setTimeout(() => setCopied(false), 1400);
-  };
-
-  const doTest = (e: MouseEvent) => {
-    e.stopPropagation();
-    if (testing || !onTest) return;
-    void onTest(prompt);
   };
 
   return (
@@ -177,31 +167,6 @@ function PromptCard({
         >
           {copied ? <span className="text-[var(--success-ink)]">Copied</span> : <span>Copy</span>}
         </button>
-        {peecSkipped ? (
-          <a
-            href="/settings/api-keys"
-            className="pill text-[11.5px] px-2.5 py-1 text-[var(--ink-3)] hover:text-[var(--ink)] hover:border-[var(--accent)]"
-            title="Add a Peec key to enable per-prompt hit refresh."
-          >
-            Add Peec key
-          </a>
-        ) : (
-          <button
-            type="button"
-            onClick={doTest}
-            disabled={testing || !onTest}
-            className="pill text-[11.5px] px-2.5 py-1 flex items-center gap-1.5 hover:border-[var(--accent)] hover:text-[var(--accent-ink)] transition disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {testing ? (
-              <>
-                <span className="w-2 h-2 rounded-full border border-[var(--accent)] border-t-transparent animate-spin" />
-                <span>Testing</span>
-              </>
-            ) : (
-              <span>Test</span>
-            )}
-          </button>
-        )}
       </div>
     </div>
   );
@@ -486,10 +451,12 @@ export interface PromptsColumnProps {
    */
   onSendChatMessage: (text: string) => Promise<void>;
   /**
-   * Re-fire the Peec baseline lookup for one prompt and update the row
-   * inline. Returns the new prompt on success; throws on failure.
+   * Re-fire the Peec brand-baseline lookup for the entire run and
+   * replace every prompt's `hits` with the freshly-fetched portfolio-
+   * wide value. Resolves with the updated prompts; throws (with `code`)
+   * on missing key / Peec failure.
    */
-  onTestPrompt: (promptId: string) => Promise<PortfolioPrompt>;
+  onRefreshHits: () => Promise<PortfolioPrompt[]>;
 }
 
 export function PromptsColumn({
@@ -502,7 +469,7 @@ export function PromptsColumn({
   runStatus,
   latestRunId,
   onSendChatMessage,
-  onTestPrompt,
+  onRefreshHits,
 }: PromptsColumnProps) {
   const [filter, setFilter] = useState<PromptFilter>('All');
   const [sort, setSort] = useState<'Cluster' | 'Intent' | 'Hits'>('Cluster');
@@ -510,7 +477,7 @@ export function PromptsColumn({
   const [exporting, setExporting] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [clusterPopoverOpen, setClusterPopoverOpen] = useState(false);
-  const [testingPromptId, setTestingPromptId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
   // Reset transient drawer / popover state when switching researches.
@@ -623,27 +590,26 @@ export function PromptsColumn({
     [onToast, researchId, latestRunId, channels.length, totalChannels],
   );
 
-  const doTest = useCallback(
-    async (prompt: PortfolioPrompt) => {
-      if (testingPromptId) return;
-      setTestingPromptId(prompt.id);
-      try {
-        await onTestPrompt(prompt.id);
-        onToast('Hits refreshed');
-      } catch (err) {
-        const maybe = err as Error & { code?: string };
-        if (maybe.code === 'missing_peec_key') {
-          onToast('Add a Peec key to refresh hits');
-          window.location.href = '/settings/api-keys?onboarding=1';
-        } else {
-          onToast('Could not refresh — try again');
-        }
-      } finally {
-        setTestingPromptId(null);
+  const doRefreshHits = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await onRefreshHits();
+      onToast('Hits refreshed');
+    } catch (err) {
+      const maybe = err as Error & { code?: string };
+      if (maybe.code === 'missing_peec_key') {
+        onToast('Add a Peec key to refresh hits');
+        window.location.href = '/settings/api-keys?onboarding=1';
+      } else if (maybe.code === 'no_run') {
+        onToast('Run research first to enable refresh');
+      } else {
+        onToast('Could not refresh — try again');
       }
-    },
-    [onTestPrompt, onToast, testingPromptId],
-  );
+    } finally {
+      setRefreshing(false);
+    }
+  }, [onRefreshHits, onToast, refreshing]);
 
   const doGenerateCluster = useCallback(
     async (cluster: PromptCluster) => {
@@ -756,7 +722,7 @@ export function PromptsColumn({
               </span>
             </div>
             <p className="text-[12px] text-[var(--ink-3)] mt-1 leading-snug">
-              Generated from your sources. Test in ChatGPT, Perplexity, and Claude.
+              Generated from your sources. Copy a prompt to test it in ChatGPT, Perplexity, or Claude.
             </p>
           </div>
         </div>
@@ -873,6 +839,35 @@ export function PromptsColumn({
             </button>
           ))}
           <span className="flex-1" />
+          {peecSkipped ? (
+            <a
+              href="/settings/api-keys"
+              className="shrink-0 btn-ghost px-2.5 py-1 rounded-md text-[11.5px] text-[var(--ink-2)] flex items-center gap-1.5 hover:bg-[var(--surface-3)]"
+              title="Add a Peec key in Settings to enable live brand-mention refresh."
+            >
+              <RefreshCw size={13} strokeWidth={1.8} aria-hidden="true" />
+              Add Peec key
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void doRefreshHits()}
+              disabled={refreshing || runStatus !== 'complete' || prompts.length === 0}
+              className="shrink-0 btn-ghost px-2.5 py-1 rounded-md text-[11.5px] text-[var(--ink-2)] flex items-center gap-1.5 hover:bg-[var(--surface-3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+              title={
+                runStatus !== 'complete'
+                  ? 'Available once your run finishes.'
+                  : 'Re-fetch the Peec brand-mention baseline for every prompt in this run.'
+              }
+            >
+              {refreshing ? (
+                <span className="w-3 h-3 rounded-full border border-[var(--accent)] border-t-transparent animate-spin" />
+              ) : (
+                <RefreshCw size={13} strokeWidth={1.8} aria-hidden="true" />
+              )}
+              {refreshing ? 'Refreshing…' : 'Refresh hits'}
+            </button>
+          )}
           <div className="shrink-0 relative">
             <button
               type="button"
@@ -913,12 +908,10 @@ export function PromptsColumn({
             key={p.id}
             prompt={p}
             onCopy={doCopy}
-            onTest={doTest}
             isNew={false}
             channels={channels}
             peecSkipped={peecSkipped}
             position={i + 1}
-            testing={testingPromptId === p.id}
           />
         ))}
         {overflow > 0 && (

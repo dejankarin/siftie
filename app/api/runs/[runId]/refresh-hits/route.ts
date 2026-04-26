@@ -1,24 +1,29 @@
 /**
- * POST /api/prompts/[promptId]/test
+ * POST /api/runs/[runId]/refresh-hits
  *
- * Rebaseline one prompt's Peec hit count without re-running the whole
- * Council. The route:
- *   1. Loads the run row that owns the prompt (verifies ownership via
- *      the research → project chain inside `getRunForOwner`).
+ * Re-fire the Peec brand-mention baseline for an entire run and write
+ * the freshly-fetched `hits` / `totalChannels` back onto **every**
+ * prompt in the run. Honest semantics: Peec doesn't index our prompt
+ * ids — its baseline lookup is portfolio-wide — so the only correct
+ * thing to do is update all prompts with the same number, not just
+ * one. (Pre-Session 9 a per-prompt `/api/prompts/[promptId]/test`
+ * endpoint pretended to "test" a single prompt while doing this same
+ * portfolio-wide lookup; the rename + scope move makes the wire path
+ * match what actually happens.)
+ *
+ * The route:
+ *   1. Loads the run, verifies ownership via the
+ *      research → project → clerk_user_id chain.
  *   2. Resolves the user's Peec key; 4xx if missing.
- *   3. Calls `fetchPeecBaseline` for a fresh 30-day brand-mention
- *      lookup. The shape of this lookup is *portfolio-wide* — Peec
- *      doesn't track our generated prompt ids — so today every prompt
- *      in a given run shares the same baseline. Test still has value
- *      because the underlying numbers drift as Peec ingests new data.
- *   4. Writes the new `hits` (and `totalChannels` / `channels` if Peec
- *      reports a different active set than the run captured) back to
- *      the run row's `prompts` JSONB. Realtime propagates the UPDATE
- *      to every open tab.
- *   5. Captures `prompt_tested` for product analytics.
+ *   3. Calls `fetchPeecBaseline` once for a fresh 30-day brand-mention
+ *      lookup against the user's Peec project.
+ *   4. Maps the new `hits` (and `totalChannels` if Peec reports a
+ *      different active set) onto every prompt in `runs.prompts`.
+ *      Realtime propagates the UPDATE to every open tab.
+ *   5. Captures `hits_refreshed` for product analytics.
  *
- * Returns the updated FinalPrompt so the optimistic client can swap
- * the row in place.
+ * Returns the updated `prompts` array so the optimistic client can
+ * swap the whole list in place.
  */
 import { withUser } from '@/lib/auth';
 import { getUserApiKey } from '@/lib/keys';
@@ -33,32 +38,21 @@ import { classifyProviderError } from '@/lib/provider-errors';
 import { getRunForOwner, updateRunPrompts } from '@/lib/runs';
 import type { FinalPrompt } from '@/lib/research/schema';
 import { getProjectIdForResearch } from '@/lib/workspace';
-import { z } from 'zod';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-const PostBody = z.object({
-  runId: z.string().min(1),
-});
+type Ctx = { params: Promise<{ runId: string }> };
 
-type Ctx = { params: Promise<{ promptId: string }> };
-
-export const POST = withUser<Ctx>(async ({ userId }, req, ctx) => {
-  const { promptId } = await ctx.params;
-  const raw = await req.json().catch(() => null);
-  const parsed = PostBody.safeParse(raw);
-  if (!parsed.success) {
-    return Response.json({ error: 'invalid_body' }, { status: 400 });
+export const POST = withUser<Ctx>(async ({ userId }, _req, ctx) => {
+  const { runId } = await ctx.params;
+  if (!runId) {
+    return Response.json({ error: 'invalid_run_id' }, { status: 400 });
   }
-  const { runId } = parsed.data;
 
   const ph = getPostHogServer();
   const start = Date.now();
 
-  // Run + ownership check (the helper walks research → project →
-  // clerk_user_id). 404 hides whether the run exists at all when the
-  // user doesn't own it.
   const run = await getRunForOwner(userId, runId);
   if (!run) {
     return Response.json({ error: 'not_found' }, { status: 404 });
@@ -69,11 +63,12 @@ export const POST = withUser<Ctx>(async ({ userId }, req, ctx) => {
       { status: 409 },
     );
   }
-  const promptIndex = run.prompts.findIndex((p) => p.id === promptId);
-  if (promptIndex < 0) {
-    return Response.json({ error: 'prompt_not_found' }, { status: 404 });
+  if (run.prompts.length === 0) {
+    return Response.json(
+      { error: 'no_prompts', message: 'This run has no prompts to refresh.' },
+      { status: 409 },
+    );
   }
-  const existing = run.prompts[promptIndex]!;
 
   const peecKey = await getUserApiKey(userId, 'peec');
   if (!peecKey) {
@@ -87,7 +82,7 @@ export const POST = withUser<Ctx>(async ({ userId }, req, ctx) => {
   }
 
   const projectId = await getProjectIdForResearch(run.researchId);
-  const traceId = `prompt_test_${runId}_${promptId}`;
+  const traceId = `hits_refresh_${runId}`;
 
   let baseline: Awaited<ReturnType<typeof fetchPeecBaseline>>;
   try {
@@ -95,10 +90,10 @@ export const POST = withUser<Ctx>(async ({ userId }, req, ctx) => {
       posthogDistinctId: userId,
       posthogTraceId: traceId,
       posthogProperties: {
-        feature: 'prompt_test',
+        feature: 'hits_refresh',
         research_id: run.researchId,
         run_id: runId,
-        prompt_id: promptId,
+        prompt_count: run.prompts.length,
       },
       posthogGroups: projectId ? { project: projectId } : undefined,
     });
@@ -124,12 +119,12 @@ export const POST = withUser<Ctx>(async ({ userId }, req, ctx) => {
     }
     ph.capture({
       distinctId: userId,
-      event: 'prompt_test_failed',
+      event: 'hits_refresh_failed',
       groups: projectId ? { project: projectId } : undefined,
       properties: {
         research_id: run.researchId,
         run_id: runId,
-        prompt_id: promptId,
+        prompt_count: run.prompts.length,
         error_code: code,
         latency_ms: Date.now() - start,
       },
@@ -137,27 +132,26 @@ export const POST = withUser<Ctx>(async ({ userId }, req, ctx) => {
     return Response.json({ error: code, message }, { status });
   }
 
-  const updated: FinalPrompt = {
-    ...existing,
+  // Portfolio-wide baseline → every prompt gets the same new hits /
+  // totalChannels. We preserve `totalChannels` per-row when Peec
+  // doesn't report a fresh count (rare; keeps backward compat with
+  // pre-channels-persistence runs).
+  const updatedPrompts: FinalPrompt[] = run.prompts.map((p) => ({
+    ...p,
     hits: baseline.hits,
-    totalChannels: baseline.totalChannels || existing.totalChannels,
-  };
-  const nextPrompts = run.prompts.slice();
-  nextPrompts[promptIndex] = updated;
+    totalChannels: baseline.totalChannels || p.totalChannels,
+  }));
 
-  await updateRunPrompts(userId, runId, nextPrompts);
+  await updateRunPrompts(userId, runId, updatedPrompts);
 
   ph.capture({
     distinctId: userId,
-    event: 'prompt_tested',
+    event: 'hits_refreshed',
     groups: projectId ? { project: projectId } : undefined,
     properties: {
       research_id: run.researchId,
       run_id: runId,
-      prompt_id: promptId,
-      cluster: existing.cluster,
-      intent: existing.intent,
-      hits_before: existing.hits,
+      prompt_count: updatedPrompts.length,
       hits_after: baseline.hits,
       total_channels: baseline.totalChannels,
       latency_ms: Date.now() - start,
@@ -165,5 +159,5 @@ export const POST = withUser<Ctx>(async ({ userId }, req, ctx) => {
     },
   });
 
-  return Response.json({ prompt: updated });
+  return Response.json({ prompts: updatedPrompts });
 });
