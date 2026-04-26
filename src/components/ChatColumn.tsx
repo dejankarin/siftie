@@ -166,7 +166,7 @@ export function ChatColumn({
       </div>
 
       <div className="px-4 pb-4 pt-2">
-        <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 shadow-[var(--shadow-input)] focus-within:border-[var(--line-strong)]">
+        <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 shadow-[var(--shadow-input)] focus-within:border-[var(--accent)] focus-within:shadow-[0_0_0_3px_var(--focus-ring)] transition-shadow">
           <textarea
             ref={taRef}
             value={draft}
@@ -174,6 +174,7 @@ export function ChatColumn({
             onKeyDown={onKeyDown}
             rows={1}
             placeholder="Reply to Siftie…"
+            aria-label="Message Siftie"
             className="w-full resize-none bg-transparent outline-none text-[14px] leading-[1.55] text-[var(--ink)] placeholder:text-[var(--ink-3)] max-h-[140px]"
           />
           <div className="flex items-center justify-between mt-2">
@@ -189,7 +190,7 @@ export function ChatColumn({
               type="button"
               onClick={submit}
               disabled={!draft.trim()}
-              className={`rounded-full px-4 h-8 text-[12px] font-medium transition
+              className={`rounded-full px-4 h-8 text-[12px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]
                 ${
                   draft.trim()
                     ? 'bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] hover:bg-[var(--btn-primary-hover)]'

@@ -1,3 +1,5 @@
+import { UserButton } from '@clerk/nextjs';
+import { KeyRound } from 'lucide-react';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import type { Theme } from '../hooks/useTheme';
 import { ThemeToggle } from './ThemeToggle';
@@ -19,6 +21,15 @@ const titles: Record<MobileTab, string> = {
   prompts: 'Prompt Portfolio',
 };
 
+/**
+ * Mobile top bar.
+ *
+ * Mirrors the desktop TopBar's right-side cluster (theme toggle + Clerk
+ * user menu w/ API Keys link) so the user has parity reach on mobile.
+ * The previous "More" button was a placeholder that didn't do anything;
+ * replacing it with `<UserButton />` lets the user open settings or
+ * sign out without leaving the workspace.
+ */
 export function MobileTopBar({ tab, theme, onToggleTheme }: MobileTopBarProps) {
   const logo = theme === 'dark' ? DARK_LOGO : LIGHT_LOGO;
   const online = useOnlineStatus();
@@ -34,18 +45,28 @@ export function MobileTopBar({ tab, theme, onToggleTheme }: MobileTopBarProps) {
         </div>
       )}
       <div className="flex items-center justify-between px-4 py-3">
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 min-w-0">
           <img src={logo} alt="Siftie" style={{ height: '14px', width: 'auto' }} />
-          <span className="w-px h-3.5 bg-[var(--line)]"></span>
-          <span className="text-[12.5px] text-[var(--ink-3)]">{titles[tab]}</span>
+          <span className="w-px h-3.5 bg-[var(--line)]" aria-hidden="true"></span>
+          <span className="text-[12.5px] text-[var(--ink-3)] truncate">{titles[tab]}</span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           <ThemeToggle theme={theme} onToggle={onToggleTheme} compact />
-          <button type="button" className="btn-ghost px-2 py-1 text-[11.5px] text-[var(--ink-3)]">
-            More
-          </button>
+          <UserButton appearance={{ elements: { avatarBox: 'w-7 h-7' } }}>
+            <UserButton.MenuItems>
+              <UserButton.Link
+                label="API Keys"
+                labelIcon={<KeyGlyph />}
+                href="/settings/api-keys"
+              />
+            </UserButton.MenuItems>
+          </UserButton>
         </div>
       </div>
     </header>
   );
+}
+
+function KeyGlyph() {
+  return <KeyRound className="w-4 h-4" />;
 }

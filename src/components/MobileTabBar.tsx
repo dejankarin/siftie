@@ -19,7 +19,13 @@ export function MobileTabBar({ tab, setTab, sourcesCount, promptCount }: MobileT
         {items.map((it) => {
           const active = tab === it.id;
           return (
-            <button key={it.id} type="button" onClick={() => setTab(it.id)} className="relative flex flex-col items-center justify-center py-3 gap-0.5">
+            <button
+              key={it.id}
+              type="button"
+              onClick={() => setTab(it.id)}
+              aria-current={active ? 'page' : undefined}
+              className="relative flex flex-col items-center justify-center py-3 gap-0.5 focus:outline-none focus-visible:bg-[var(--surface-2)]"
+            >
               <span className={`text-[12.5px] font-medium ${active ? 'text-[var(--ink)]' : 'text-[var(--ink-3)]'}`}>
                 {it.label}
                 {it.count != null && it.count > 0 && (

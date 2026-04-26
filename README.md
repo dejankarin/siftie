@@ -8,7 +8,7 @@ A three-column research workspace (Sources / Chat / Prompts) that turns brand so
 
 ## Status
 
-Built and deployed in 48-hour sprints, tracked as nine "sessions". As of **commit `b375909`** plus follow-ups:
+Built and deployed in 48-hour sprints, tracked as nine "sessions". As of **commit `ab7546d`**:
 
 | Session | What | Status |
 |---|---|---|
@@ -23,7 +23,7 @@ Built and deployed in 48-hour sprints, tracked as nine "sessions". As of **commi
 | 6.6 | Three-column IA polish (Sources / Chat / Output) + Markdown report download | Shipped |
 | —   | Deep-link routing `/app/[projectId]/[researchId]` + `sources` Realtime sync | Shipped |
 | 7 | Prompts column live (dynamic HitsBar, Show-all drawer, CSV export) | Shipped |
-| 8 | Reply router (Tavily web search) + landing polish + mobile pass | Pending |
+| 8 | Reply router (Tavily web search) + landing polish + mobile pass | Shipped |
 | 9 | Demo prep + PostHog dashboard + 2 evals + 1 cluster view + final README | Pending |
 
 Beyond the original plan, the following also shipped:
@@ -41,6 +41,9 @@ Beyond the original plan, the following also shipped:
 - **PostHog source maps** uploaded automatically on every Vercel production build for symbolicated stack traces.
 - **App + global error boundaries** (`app/error.tsx`, `app/global-error.tsx`).
 - **Session 7 prompts column** — dynamic HitsBar that scales to the live Peec channel set with channel-name tooltips (one cell per `model_channel_id`, persisted on `runs.channels` JSONB so the bar labels itself without a refetch); a per-prompt **Test** button that re-fires the Peec brand-baseline lookup via `POST /api/prompts/[promptId]/test` and updates the row inline; a **Show all N** bottom drawer with per-prompt Chair rationale in collapsible `<details>`; a **Generate cluster** popover (Category / Persona / Comparison) that posts a synthetic `Generate a new <Cluster> cluster of prompts.` message into chat for the Session 8 reply router; a **Peec-skipped** dismissible banner (per-research, persisted in `localStorage`), empty-state surface-rate card, and "Hits" sort hidden when there's no Peec data; per-prompt **Test** swaps to **Add Peec key** in the same state; CSV export via `GET /api/research/[runId]/export` (UTF-8 BOM + CRLF for Excel, leading `# Peec: skipped` comment line when applicable) wired to a text button inside the drawer; PostHog client + server events `prompt_copied`, `prompt_tested`, `prompt_test_failed`, `prompt_cluster_generated`, and `csv_exported` with cluster / intent / hit-state / channel-count / surface metadata.
+- **Session 8 reply router** — `lib/reply-router.ts` runs Gemini 3 Flash with structured output to classify every non-first chat message into `chat_only` / `refine_prompts` / `rebaseline` / `run_research` / `web_search`. The `web_search` branch fans out to `lib/tavily.ts#searchWeb` + a second Gemini summariser (`summariseSearchHits`) that writes a 2–4 sentence reply with inline `[n]` citations and a Markdown `Sources:` footer. `POST /api/messages` returns the lead-in agent reply immediately and runs all side effects (web search summary, `runResearchPipeline` for `run_research` / `rebaseline`) behind `waitUntil`, with follow-up bubbles arriving via Supabase Realtime. PostHog events: `reply_router_decision`, `reply_router_failed`, `reply_router_websearch_completed`, `reply_router_websearch_failed`, `reply_router_run_research_failed` — all carry `$ai_trace_id` so they correlate with the `$ai_generation` events in LLM Analytics. Defensive: when Gemini returns `web_search` but the user has no Tavily key, the router downgrades to `chat_only` so the user always gets a reply.
+- **Session 8 landing page** — `app/page.tsx` is a server component (Clerk `auth()` redirects signed-in users to `/app`) with sticky nav (logo + theme toggle + Log in + Sign up), a hero (badge, headline, tagline, primary CTA, BYOK reassurance), a three-step value-prop grid (Add sources → Chat with the agent → Get a tested portfolio), and a token-driven HTML mock of the 3-column workspace that swaps with the theme toggle so it never goes stale relative to the real app.
+- **Session 8 mobile pass** — `AddSourceModal` switched to a flex-column with `max-h-[calc(100dvh-2rem)]` + scrollable body so the Cancel/Add buttons stay anchored on landscape phones; `MobileTopBar` placeholder "More" button replaced with the real Clerk `<UserButton />` (with the API Keys link mirroring desktop); mobile `<main>` padding bumped to `pb-[calc(58px+env(safe-area-inset-bottom))]` so the chat composer clears the iPhone home indicator; `MobileTabBar` tab buttons gain `aria-current` + visible focus styling; `ChatColumn` composer wrapper uses `focus-within:shadow-[0_0_0_3px_var(--focus-ring)]` and the Send button gains `focus-visible:ring`.
 
 ## Run locally
 
@@ -110,7 +113,12 @@ Other scripts:
        └──────────┘           └──────────┘           └──────────┘
 
   /api/sources              → Tavily Extract / mammoth / inline PDF → Gemini Flash → ContextDoc → Supabase
-  /api/messages             → Gemini Flash interview Q's (first six) / chat passthrough        → Supabase
+  /api/messages (first)     → Gemini Flash first-six interview questions             → Supabase
+  /api/messages (subseq.)   → Reply router (Gemini Flash structured output) → branch:
+                                chat_only      → persist agent reply
+                                refine_prompts → cluster ack
+                                rebaseline / run_research → waitUntil(startResearchRun)
+                                web_search     → waitUntil(searchWeb + summarise)
   /api/research             → Ideate (GPT-5.4 → Gemini Pro fallback)
                               → [Peec baseline if key]
                               → Council (4 OpenRouter models, 3 stages, anonymised)
@@ -118,6 +126,8 @@ Other scripts:
                               → runs row + chat bubbles via Realtime
   /api/research/cancel      → flip status='cancelling'; orchestrator polls between stages
   /api/research/[id]/report → Gemini Flash TL;DR + Markdown export (sources, prompts, transcript)
+  /api/research/[id]/export → CSV export of the prompt portfolio (UTF-8 BOM + CRLF, Excel-friendly)
+  /api/prompts/[id]/test    → re-run the Peec brand baseline for a single prompt → updateRunPrompts
 ```
 
 ## Project layout
@@ -125,7 +135,8 @@ Other scripts:
 ```
 app/
   layout.tsx                  Root HTML, fonts, anti-FOUC theme, ClerkProvider, PostHogProvider, PostHogIdentify
-  page.tsx                    Landing page (signed-in users redirect to /app)
+  page.tsx                    Marketing landing page — hero + three-step value prop + workspace HTML mock + footer (signed-in users redirect to /app)
+  LandingThemeToggle.tsx      Client wrapper that hydrates the theme toggle on the (otherwise server-rendered) landing page
   AppShell.tsx                Dynamic-imported workspace shell (ssr: false). Accepts optional initialProjectId / initialResearchId for deep-link entry.
   globals.css                 Design tokens + light/dark theme
   error.tsx, global-error.tsx Client + root error boundaries (PostHog Error Tracking)
@@ -151,6 +162,8 @@ app/
     research/route.ts         POST start a research run (returns 202, work runs in waitUntil)
     research/cancel/route.ts  POST flip a running run to status='cancelling' (orchestrator polls between stages)
     research/[runId]/report/route.ts  GET stream a Markdown report for a completed run
+    research/[runId]/export/route.ts  GET stream a CSV of the prompt portfolio (UTF-8 BOM + CRLF)
+    prompts/[promptId]/test/route.ts  POST re-run the Peec brand baseline for a single prompt
 lib/
   auth.ts                     requireUser() — Clerk auth + lazy user_profiles upsert
   council.ts                  3-stage Council (independent review → cross review → Chair)
@@ -167,17 +180,19 @@ lib/
   openai.ts                   OpenAI Platform wrapper (gpt-5.4, reasoning-aware)
   openrouter.ts               OpenRouter wrapper (Council models, reasoning-aware)
   peec.ts                     Peec REST wrappers (listChannels, getUrlReport, etc.)
+  peec-baseline.ts            Single-shot brand-baseline lookup reused by per-prompt Test (POST /api/prompts/[id]/test)
   posthog.ts                  Server PostHog singleton + getPostHogServer()
   privacy.ts                  Reads user_profiles.posthog_capture_llm
   provider-errors.ts          Normalises raw SDK errors into stable user-facing codes
-  report.ts                   Markdown report builder (Gemini Flash TL;DR + run metadata + sources + prompts + transcript)
+  reply-router.ts             Session 8 reply router — Gemini 3 Flash structured output classifies non-first chat messages; second-stage summariser writes citation-rich web-search replies
+  report.ts                   Markdown report builder (Gemini Flash TL;DR + run metadata + sources + prompts + transcript) + CSV export (`buildCsvReport`, RFC 4180, UTF-8 BOM + CRLF)
   research/schema.ts          Zod schemas for IdeatePrompt, ReviewerVerdict, ChairPick, FinalPrompt
   research.ts                 Top-level orchestrator (Ideate → Peec → Council → Surface), polls for soft cancellation
   resilience.ts               Shared withResilience helper (timeouts, retries, abort rules)
-  runs.ts                     Run lifecycle (createRun, completeRun, failRun, getLatestRunByResearch, getRunForOwner, requestRunCancel)
+  runs.ts                     Run lifecycle (createRun, completeRun, failRun, getLatestRunByResearch, getRunForOwner, requestRunCancel, updateRunPrompts)
   sources.ts                  Source persistence + listing
   supabase/                   Supabase clients (server with Clerk JWT; browser with public anon)
-  tavily.ts                   Tavily wrapper (extract, search)
+  tavily.ts                   Tavily wrapper (extract, search — used by the Session 8 reply router for web_search actions)
   workspace.ts                Project + research CRUD against Supabase, plus userOwnsProjectAndResearch() ownership check used by the deep-link route
 src/
   App.tsx                     Three-column desktop + mobile-tab layout. Bidirectional URL ⇄ active-pair sync (push on UI switch, adopt URL on back/forward).
@@ -190,6 +205,7 @@ src/
 supabase/migrations/
   20260425225511_initial_schema.sql        # all v1 tables + RLS + Realtime publication
   20260426010000_add_openai_provider.sql   # adds 'openai' to user_api_keys.provider check
+  20260426120000_add_run_channels.sql      # adds runs.channels JSONB (Peec model channel id + description) for the dynamic HitsBar
 instrumentation.ts            OpenTelemetry LoggerProvider for PostHog Logs (Node runtime, prod only)
 middleware.ts                 Clerk middleware (public: /, /sign-in, /sign-up, /api/clerk/webhook)
 scripts/upload-sourcemaps.mjs PostHog source-map upload (postbuild, prod only)
@@ -223,7 +239,7 @@ Schema overview (all RLS-scoped on Clerk user id):
 - `user_api_keys` — encrypted BYOK keys per `(clerk_user_id, provider)`. Providers: `openai`, `gemini`, `openrouter`, `tavily`, `peec`.
 - `projects` → `researches` → `sources` / `messages` / `runs`.
 - `messages.council_role` (`reviewer | chair`) + `messages.council_seat` (1–4) replay anonymised Council bubbles on refresh.
-- `runs` — one per research run; stores `prompts` JSONB, `total_channels`, `peec_skipped`, `council_depth`, `status`.
+- `runs` — one per research run; stores `prompts` JSONB, `channels` JSONB (Peec model channels surfaced for this run, used by the dynamic HitsBar tooltips), `total_channels`, `peec_skipped`, `council_depth`, `status`.
 - Realtime publication: `sources`, `messages`, `runs`.
 
 ## Privacy

@@ -143,13 +143,17 @@ export function AddSourceModal({ open, initialTab = 'pdf', onClose, onAdd }: Add
       role="presentation"
     >
       <div
-        className="w-full max-w-[520px] bg-[var(--surface)] rounded-2xl border border-[var(--line)] shadow-[var(--shadow-pop)] overflow-hidden"
+        // Cap height to viewport-minus-padding and lay out as a flex column so
+        // the header + tabs + footer stay anchored while the body scrolls.
+        // Critical on landscape phones where the modal would otherwise push
+        // the Cancel/Add buttons below the visible area.
+        className="w-full max-w-[520px] max-h-[calc(100dvh-2rem)] bg-[var(--surface)] rounded-2xl border border-[var(--line)] shadow-[var(--shadow-pop)] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-source-title"
       >
-        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-[var(--line-2)]">
+        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-[var(--line-2)] shrink-0">
           <div>
             <h3 id="add-source-title" className="text-[15px] font-semibold text-[var(--ink)]">
               Add a source
@@ -167,7 +171,7 @@ export function AddSourceModal({ open, initialTab = 'pdf', onClose, onAdd }: Add
             Close
           </button>
         </div>
-        <div className="flex gap-1 px-3 pt-3 border-b border-[var(--line-2)]">
+        <div className="flex gap-1 px-3 pt-3 border-b border-[var(--line-2)] shrink-0">
           {tabs.map((t) => (
             <button
               key={t.id}
@@ -188,7 +192,7 @@ export function AddSourceModal({ open, initialTab = 'pdf', onClose, onAdd }: Add
             </button>
           ))}
         </div>
-        <div className="p-5">
+        <div className="p-5 overflow-y-auto flex-1 min-h-0">
           {tab === 'pdf' && (
             <>
               <input
@@ -319,7 +323,7 @@ export function AddSourceModal({ open, initialTab = 'pdf', onClose, onAdd }: Add
             </p>
           )}
         </div>
-        <div className="px-5 pb-5 pt-1 flex items-center justify-end gap-2">
+        <div className="px-5 pb-5 pt-3 border-t border-[var(--line-2)] flex items-center justify-end gap-2 shrink-0">
           <button
             type="button"
             onClick={onClose}
