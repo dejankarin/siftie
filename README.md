@@ -1,81 +1,249 @@
-# siftie.app
+# Siftie
 
-Source: [github.com/dejankarin/siftie](https://github.com/dejankarin/siftie)
+> Your brand, in every AI answer. Siftie builds and tests a prompt portfolio across different LLMs — from sources you already have.
 
-A three-column research UI for **Siftie** — a chat-driven prompt-portfolio builder that turns brand sources (PDFs, URLs, pasted text, internal DB) into AI-engine-ready prompts. Built with Next.js (App Router) + React + TypeScript + Tailwind, deployed on Vercel at [siftie.app](https://siftie.app).
+**Live:** [siftie.app](https://siftie.app) · **Repo:** [github.com/dejankarin/siftie](https://github.com/dejankarin/siftie)
 
-## Run the UI locally
+A three-column research workspace (Sources / Chat / Prompts) that turns brand sources (PDFs, URLs, Word docs, Markdown) into AI-engine-ready prompts. The agent narrates the entire research pipeline inside the chat column, including anonymised LLM Council reviewer bubbles. Bring-your-own-keys (BYOK) — every user pastes their own OpenAI / Gemini / OpenRouter / Tavily keys (and optionally Peec) and pays for their own usage.
+
+## Status
+
+Built and deployed in 48-hour sprints, tracked as nine "sessions". As of **commit `861596c`**:
+
+| Session | What | Status |
+|---|---|---|
+| 1 | Clerk auth + Supabase RLS + PostHog init/identify + Vercel deploy | Shipped |
+| 2A | Settings → API Keys (BYOK encrypt + test) + Privacy toggle | Shipped |
+| 2B | Workspace persistence (Supabase) + first-sign-in keys gate | Shipped |
+| 3 | Live source ingest (PDF / URL / Word doc / Markdown) | Shipped |
+| 4 | Live chat + Gemini-generated interview questions | Shipped |
+| 5 | Peec REST wrappers + shared resilience layer + offline banner | Shipped |
+| 6 | Research orchestrator (Ideate → [Peec] → Council → Surface) + chat narration | Shipped |
+| 7 | Prompts column live (dynamic HitsBar, Show-all drawer, CSV export) | Pending |
+| 8 | Reply router (Tavily web search) + landing polish + mobile pass | Pending |
+| 9 | Demo prep + PostHog dashboard + 2 evals + 1 cluster view + final README | Pending |
+
+Beyond the original plan, the following also shipped:
+
+- **OpenAI Platform direct** as the Ideate primary (GPT-5.4) with Gemini Pro fallback, plus an OpenAI fallback for source ingestion when Gemini Flash is unavailable. Independent of OpenRouter so users can use their existing OpenAI billing.
+- **PostHog Logs** via OpenTelemetry / OTLP HTTP — every server log line ships to PostHog Cloud EU as structured events keyed by Clerk user id and run id (production only).
+- **PostHog feature flags** server-resolved and bootstrapped to the browser on every render so flag values match what the server saw — no flicker.
+- **PostHog group analytics** so events are also attributed to the active Siftie project.
+- **PostHog source maps** uploaded automatically on every Vercel production build for symbolicated stack traces.
+- **App + global error boundaries** (`app/error.tsx`, `app/global-error.tsx`).
+
+## Run locally
 
 ```sh
+cp .env.local.example .env.local   # fill in the values
 npm install
 npm run dev
 ```
 
-Then open http://localhost:3000/ (Next.js default). If something else already uses port 3000, run `PORT=3001 npm run dev` and open that port instead.
+Open <http://localhost:3000>. If port 3000 is busy, `PORT=3001 npm run dev`.
 
 Other scripts:
 
-- `npm run build` — production build (`.next/`)
-- `npm run start` — serve the production build on http://localhost:3000/
-- `npm run typecheck` — TypeScript check without emit
-- `npm run lint` — Next.js lint
+- `npm run build` — production build (`.next/`). Postbuild uploads source maps to PostHog when `VERCEL_ENV=production`.
+- `npm run start` — serve the production build.
+- `npm run typecheck` — TypeScript with no emit.
+- `npm run lint` — Next.js lint.
 
-## Deploying to Vercel
+## Tech stack
 
-The repo is a stock Next.js app, so Vercel auto-detects it. Either import the GitHub repo from the Vercel dashboard, or run `vercel` / `vercel --prod` from the repo root. No additional config or build settings are required.
+**Framework:** Next.js 15 (App Router) · React 18 · TypeScript · Tailwind v3 · deployed on Vercel (Fluid Compute, Node.js 24)
 
-### Project layout
+**Auth:** Clerk (`@clerk/nextjs`) — `<ClerkProvider>` in `app/layout.tsx`, `clerkMiddleware()` in `middleware.ts`, prebuilt sign-in / sign-up pages, `<UserButton />` in TopBar.
+
+**Database:** Supabase (Postgres + Realtime), RLS scoped on `auth.jwt() ->> 'sub'` (Clerk user id). Server client in `lib/supabase/server.ts` mints an authenticated Supabase token from Clerk via the third-party-auth integration.
+
+**Encryption:** AES-256-GCM (Node `crypto`) with a 12-byte IV per row (`lib/crypto.ts`). Master key in `KEY_ENCRYPTION_KEY` env var. Provider keys are decrypted only inside server route handlers, never logged.
+
+**Models** (BYOK — every user supplies their own keys):
+
+| Stage | Model | Provider | Notes |
+|---|---|---|---|
+| Source ingestion (primary) | `gemini-3-flash-preview` | Gemini API | ContextDoc extraction with `ThinkingLevel.LOW`. Native PDF inline support. |
+| Source ingestion (fallback) | `gpt-5.4` | OpenAI Platform | Used when Gemini Flash fails / quota. |
+| Interview questions | `gemini-3-flash-preview` | Gemini API | First six gap-attributed questions per research. |
+| **Ideate (primary)** | **`gpt-5.4`** | **OpenAI Platform** | ~24 candidate prompts, structured output via `response_format: json_schema`, reasoning model with `reasoning_effort: 'low'`. |
+| Ideate (fallback) | `gemini-3.1-pro-preview` | Gemini API | `ThinkingLevel.MEDIUM`. Paid tier only (no free tier on Pro 3.1). |
+| Council reviewers | `openai/gpt-5.4`, `google/gemini-3.1-pro-preview`, `anthropic/claude-opus-4.5`, `x-ai/grok-4` | OpenRouter | Anonymised seats 1–4. Quick depth = 3 seats; Standard = 4. |
+| Council Chair | `google/gemini-3.1-pro-preview` | OpenRouter | Synthesises the final picks with per-prompt `councilNote`. |
+
+**Web layer:** Tavily (`@tavily/core`) — `extract` for URL ingestion, `search` reserved for the Session 8 reply router action.
+
+**Optional:** Peec (`x-api-key` header) — live brand-mention data per prompt for Enterprise customers. The orchestrator skips the Peec step when no key is configured; the prompts column renders an empty-HitsBar banner with an "Add Peec key" link.
+
+**Observability:** PostHog Cloud EU (`posthog-js`, `posthog-node`, `@posthog/ai`, OpenTelemetry logs).
+
+- Web Analytics + product events on the landing page.
+- LLM Analytics auto-instrumented via `@posthog/ai/openai` and `@posthog/ai/gemini` — every Ideate / Council / Chair / ContextDoc call emits a `$ai_generation` event tagged with `feature`, `provider`, `posthogTraceId: research_<runId>`, and Clerk user id.
+- Application logs via OpenTelemetry → OTLP HTTP → `https://eu.i.posthog.com/i/v1/logs` with `service.name=siftie-app` and `deployment.environment` (production only — see `instrumentation.ts`).
+- Group analytics attribute every event to the active Siftie project.
+- Feature flags resolved server-side and bootstrapped to the browser (see `lib/flags.ts`).
+- Source maps uploaded by `scripts/upload-sourcemaps.mjs` on every Vercel production build.
+
+## Architecture
+
+```
+                        ┌─────────────────────┐
+                        │ siftie.app (Vercel) │
+                        └──────────┬──────────┘
+                                   │
+            ┌──────────────────────┼──────────────────────┐
+            │                      │                      │
+       ┌────▼─────┐           ┌────▼─────┐           ┌────▼─────┐
+       │  Clerk   │           │ Supabase │           │ PostHog  │
+       │  (auth)  │           │ (Postgres│           │ (EU      │
+       │          │           │ Realtime)│           │  cloud)  │
+       └──────────┘           └──────────┘           └──────────┘
+
+  /api/sources    → Tavily Extract / mammoth / inline PDF → Gemini Flash → ContextDoc → Supabase
+  /api/messages   → Gemini Flash interview Q's (first six) / chat passthrough        → Supabase
+  /api/research   → Ideate (GPT-5.4 → Gemini Pro fallback)
+                    → [Peec baseline if key]
+                    → Council (4 OpenRouter models, 3 stages, anonymised)
+                    → Chair synthesis
+                    → runs row + chat bubbles via Realtime
+```
+
+## Project layout
 
 ```
 app/
-  layout.tsx                  # root HTML, fonts, anti-FOUC theme bootstrap
-  page.tsx                    # renders <App />
-  globals.css                 # design tokens + light/dark theme
+  layout.tsx                  Root HTML, fonts, anti-FOUC theme, ClerkProvider, PostHogProvider, PostHogIdentify
+  page.tsx                    Landing page (signed-in users redirect to /app)
+  AppShell.tsx                Dynamic-imported workspace shell (ssr: false)
+  globals.css                 Design tokens + light/dark theme
+  error.tsx, global-error.tsx Client + root error boundaries (PostHog Error Tracking)
+  icon.svg                    Favicon (dark Siftie mark, #041923 background)
+  app/
+    page.tsx                  Server component — requires auth, gates on 3 required keys
+  settings/
+    layout.tsx                SettingsTopBar + SettingsSidebar
+    api-keys/page.tsx + ApiKeysForm.tsx
+    privacy/page.tsx + PrivacyToggle.tsx
+  sign-in/[[...sign-in]]/page.tsx
+  sign-up/[[...sign-up]]/page.tsx
+  api/
+    keys/route.ts             POST upserts encrypted user_api_keys
+    keys/test/[provider]/route.ts
+    privacy/route.ts          POST toggles user_profiles.posthog_capture_llm
+    workspace/route.ts        GET projects + researches for current user
+    projects/route.ts + [id]/route.ts
+    researches/route.ts + [id]/route.ts
+    sources/route.ts + [id]/route.ts + [id]/reindex/route.ts
+    messages/route.ts         POST user reply (also generates first-six interview questions)
+    research/route.ts         POST start a research run (returns 202, work runs in waitUntil)
+lib/
+  auth.ts                     requireUser() — Clerk auth + lazy user_profiles upsert
+  council.ts                  3-stage Council (independent review → cross review → Chair)
+  crypto.ts                   AES-256-GCM encrypt/decrypt for BYOK keys
+  docx.ts                     mammoth wrapper (Word doc → text + html)
+  flags.ts                    Typed PostHog feature flags + server-side accessor
+  gemini.ts                   Gemini 3 Flash wrapper (PostHog-instrumented)
+  ideate.ts                   Ideate stage — OpenAI primary, Gemini Pro fallback
+  ingest/                     ContextDoc Zod schema + dispatcher (pdf/url/doc/md)
+  interview.ts                First-six interview questions via Gemini Flash
+  keys.ts                     getUserApiKey(userId, provider) + listKeyStatus
+  logger.ts                   OpenTelemetry-backed structured logger (lazily resolves loggerProvider)
+  messages.ts                 Chat persistence + listing
+  openai.ts                   OpenAI Platform wrapper (gpt-5.4, reasoning-aware)
+  openrouter.ts               OpenRouter wrapper (Council models, reasoning-aware)
+  peec.ts                     Peec REST wrappers (listChannels, getUrlReport, etc.)
+  posthog.ts                  Server PostHog singleton + getPostHogServer()
+  privacy.ts                  Reads user_profiles.posthog_capture_llm
+  provider-errors.ts          Normalises raw SDK errors into stable user-facing codes
+  research/schema.ts          Zod schemas for IdeatePrompt, ReviewerVerdict, ChairPick, FinalPrompt
+  research.ts                 Top-level orchestrator (Ideate → Peec → Council → Surface)
+  resilience.ts               Shared withResilience helper (timeouts, retries, abort rules)
+  runs.ts                     Run lifecycle (createRun, completeRun, failRun, getLatestRunByResearch)
+  sources.ts                  Source persistence + listing
+  supabase/                   Supabase clients (server with Clerk JWT; browser with public anon)
+  tavily.ts                   Tavily wrapper (extract, search)
+  workspace.ts                Project + research CRUD against Supabase
 src/
-  App.tsx                     # 'use client' — state orchestration + layout
-  components/                 # TopBar, MobileTopBar, MobileTabBar
-                              # SourcesColumn, ChatColumn, PromptsColumn
-                              # ResearchNav (project / research popover)
-                              # AddSourceModal, EditSourceModal, ThemeToggle, Toast
-  hooks/                      # useTheme, useViewport, useWorkspace
-  data/mock.ts                # Loftway demo content
-  data/workspace.ts           # workspace seed + blank-research factory
-  types.ts                    # shared types
-public/assets/                # Siftie logos (light + dark)
-logo/                         # local-only logo source files (gitignored)
-design-extract/               # original HTML+JSX prototype (reference only)
+  App.tsx                     Three-column desktop + mobile-tab layout
+  components/                 TopBar, MobileTopBar, MobileTabBar, SourcesColumn, ChatColumn,
+                              PromptsColumn, ResearchNav, AddSourceModal, EditSourceModal,
+                              ThemeToggle, Toast
+  hooks/                      useTheme, useViewport, useWorkspace
+  data/                       mock + workspace seed factories
+  types.ts                    Shared types
+supabase/migrations/
+  20260425225511_initial_schema.sql        # all v1 tables + RLS + Realtime publication
+  20260426010000_add_openai_provider.sql   # adds 'openai' to user_api_keys.provider check
+instrumentation.ts            OpenTelemetry LoggerProvider for PostHog Logs (Node runtime, prod only)
+middleware.ts                 Clerk middleware (public: /, /sign-in, /sign-up, /api/clerk/webhook)
+scripts/upload-sourcemaps.mjs PostHog source-map upload (postbuild, prod only)
 ```
 
-### Theming
+## Environment variables
 
-The light/dark theme is driven by CSS variables under `:root` and `[data-theme="dark"]` in `app/globals.css`. The toggle persists to `localStorage` (key `siftie.theme`) and falls back to `prefers-color-scheme`.
+Copy `.env.local.example` to `.env.local` and fill it in. The full key list lives in the example file with inline comments. Summary:
 
-### Projects & research sessions
+- **Clerk** — `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `CLERK_WEBHOOK_SECRET`, plus the four `NEXT_PUBLIC_CLERK_*_URL` vars that pin the sign-in / sign-up routes inside the app.
+- **Supabase** — `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, plus `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` for the browser.
+- **`KEY_ENCRYPTION_KEY`** — base64-encoded 32-byte master key (`openssl rand -base64 32`). Lose this and every user re-pastes their provider keys.
+- **PostHog** — `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST=https://eu.i.posthog.com`. Optional: `POSTHOG_PERSONAL_API_KEY` (provisioning evals/dashboards) and `POSTHOG_CLI_API_KEY` (Vercel-prod-only, source-map upload).
+- **`NEXT_PUBLIC_APP_URL`** — `https://siftie.app` in prod.
 
-The Sources column hosts a project / research switcher (top of the column). Each **research session** owns its own sources, chat, and prompt portfolio — switching swaps all three columns at once. Workspace state (projects + research sessions) persists to `localStorage` under `siftie.workspace.v1`, and a new research starts blank with a one-line greeting from the agent.
+**No platform-level provider keys.** No `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, or `PEEC_API_KEY` in Vercel — those are per-user, encrypted in `user_api_keys`, and decrypted on demand inside server route handlers.
 
-## Contributor setup
+## Database
 
-This repo uses [Entire](https://entire.io) to capture AI-agent sessions alongside Git commits. Hooks for Cursor, Claude Code, Codex, Factory AI Droid, and Gemini CLI are committed in this repo and are skipped automatically if the `entire` CLI is not installed.
-
-To participate in shared session history (recommended):
+Migrations live in `supabase/migrations/`. Apply with the Supabase CLI:
 
 ```sh
-# 1. Install the Entire CLI
+supabase login
+supabase link --project-ref <your-project-ref>
+supabase db push
+```
+
+Schema overview (all RLS-scoped on Clerk user id):
+
+- `user_profiles` — one row per Clerk user; carries `posthog_capture_llm` (default `true`).
+- `user_api_keys` — encrypted BYOK keys per `(clerk_user_id, provider)`. Providers: `openai`, `gemini`, `openrouter`, `tavily`, `peec`.
+- `projects` → `researches` → `sources` / `messages` / `runs`.
+- `messages.council_role` (`reviewer | chair`) + `messages.council_seat` (1–4) replay anonymised Council bubbles on refresh.
+- `runs` — one per research run; stores `prompts` JSONB, `total_channels`, `peec_skipped`, `council_depth`, `status`.
+- Realtime publication: `sources`, `messages`, `runs`.
+
+## Privacy
+
+Settings → Privacy exposes a single toggle that maps to `user_profiles.posthog_capture_llm` (default ON). Effect:
+
+- **ON:** PostHog `$ai_generation` events include prompt + response bodies (which may include derived brand/source summaries).
+- **OFF:** Only metadata (model, tokens, cost, latency, run id, tags) — bodies are stripped via `posthogPrivacyMode: true`.
+
+Either way, we **never** capture decrypted provider keys, raw uploaded files, email, or name.
+
+## Theming
+
+Light / dark theme driven by CSS custom properties under `:root` and `[data-theme="dark"]` in `app/globals.css`. The toggle persists to `localStorage['siftie.theme']` and falls back to `prefers-color-scheme`. An anti-FOUC inline script in `app/layout.tsx` reads the key before hydration so the first paint is correct.
+
+## Deploying to Vercel
+
+The repo is a stock Next.js app, so Vercel auto-detects it. Either import the GitHub repo from the Vercel dashboard or run `vercel` / `vercel --prod` from the repo root. Make sure all env vars from `.env.local.example` are configured under Vercel → Project → Settings → Environment Variables before the first production build. The `siftie.app` domain is already attached.
+
+`vercel.json` skips deployments for `entire/checkpoints/v1` and `entire/**` branches so checkpoint pushes don't churn previews.
+
+## Contributor setup (Entire)
+
+This repo uses [Entire](https://entire.io) to capture AI-agent sessions alongside Git commits. Hooks for Cursor, Claude Code, Codex, Factory AI Droid, and Gemini CLI are committed and skipped automatically if the `entire` CLI is not installed.
+
+```sh
 curl -fsSL https://entire.io/install.sh | bash
 
-# 2. From the repo root, enable Entire for the agents you use
 entire enable --no-init-repo --agent cursor
 entire configure --agent claude-code
 entire configure --agent codex
 entire configure --agent factoryai-droid
 entire configure --agent gemini
 
-# 3. Pull the shared checkpoints branch
 git fetch origin entire/checkpoints/v1:entire/checkpoints/v1
-
-# 4. Verify
 entire status
 ```
 
-After this, every `git push` will also push session checkpoints to the `entire/checkpoints/v1` branch on `origin`, and `git fetch` will pull in checkpoints created by other contributors. Use `entire attach` or `entire rewind` to resume a teammate's session.
+After this, every `git push` also pushes session checkpoints to the `entire/checkpoints/v1` branch, and `git fetch` pulls in checkpoints from other contributors. Use `entire attach` or `entire rewind` to resume a teammate's session.
