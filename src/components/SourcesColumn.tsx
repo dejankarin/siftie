@@ -18,7 +18,9 @@ function TypeChip({ type, dense = false }: { type: Source['type']; dense?: boole
   const t = SOURCE_TYPES[type];
   return (
     <span
-      className={`chip ${dense ? '!px-2 !py-[2px] !text-[10.5px]' : ''}`}
+      className={`chip inline-flex items-center justify-center shrink-0 ${
+        dense ? '!px-2 !py-[2px] !text-[10.5px] min-w-[48px]' : 'min-w-[56px]'
+      }`}
       style={{
         background: `color-mix(in oklch, ${t.dot} 14%, transparent)`,
         color: t.dot,
