@@ -64,8 +64,9 @@ export function ResearchNav(props: ResearchNavProps) {
               <Plus size={14} strokeWidth={1.8} aria-hidden="true" />
             </span>
             <span className="flex-1 text-[13.5px] font-medium text-[var(--ink)] leading-tight">New research</span>
-            <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 h-5 rounded border border-[var(--line)] bg-[var(--surface-2)] text-[10.5px] text-[var(--ink-3)] font-mono">
-              ⌘N
+            <kbd className="hidden sm:inline-flex items-center justify-center gap-px px-1.5 h-[18px] min-w-[28px] rounded-md border border-[var(--line)] bg-[var(--surface-2)] text-[11px] leading-none text-[var(--ink-3)] font-sans tracking-tight">
+              <span aria-hidden="true">⌘</span>
+              <span aria-hidden="true">N</span>
             </kbd>
             <span className="sr-only">{RAIL_NEW_KEY}</span>
           </button>
