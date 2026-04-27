@@ -406,18 +406,16 @@ export function SourcesColumn({
         )}
       </div>
 
-      {sources.length > 0 && (
-        <div className="shrink-0 px-5 py-5 border-t border-[var(--line-2)] mt-auto">
-          <RunResearchButton
-            onClick={onRunResearch}
-            onCancel={onCancelResearch}
-            status={runStatus}
-            disabled={!canRunResearch}
-            primaryLabel="Start research"
-            className="w-full justify-center"
-          />
-        </div>
-      )}
+      <div className="shrink-0 px-5 py-5 border-t border-[var(--line-2)] mt-auto">
+        <RunResearchButton
+          onClick={onRunResearch}
+          onCancel={onCancelResearch}
+          status={runStatus}
+          disabled={!canRunResearch}
+          primaryLabel="Start research"
+          className="w-full justify-center"
+        />
+      </div>
     </section>
   );
 }

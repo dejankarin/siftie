@@ -309,24 +309,3 @@ Light / dark theme driven by CSS custom properties under `:root` and `[data-them
 ## Deploying to Vercel
 
 The repo is a stock Next.js app, so Vercel auto-detects it. Either import the GitHub repo from the Vercel dashboard or run `vercel` / `vercel --prod` from the repo root. Make sure all env vars from `.env.local.example` are configured under Vercel → Project → Settings → Environment Variables before the first production build. The `siftie.app` domain is already attached.
-
-`vercel.json` skips deployments for `entire/checkpoints/v1` and `entire/**` branches so checkpoint pushes don't churn previews.
-
-## Contributor setup (Entire)
-
-This repo uses [Entire](https://entire.io) to capture AI-agent sessions alongside Git commits. Hooks for Cursor, Claude Code, Codex, Factory AI Droid, and Gemini CLI are committed and skipped automatically if the `entire` CLI is not installed.
-
-```sh
-curl -fsSL https://entire.io/install.sh | bash
-
-entire enable --no-init-repo --agent cursor
-entire configure --agent claude-code
-entire configure --agent codex
-entire configure --agent factoryai-droid
-entire configure --agent gemini
-
-git fetch origin entire/checkpoints/v1:entire/checkpoints/v1
-entire status
-```
-
-After this, every `git push` also pushes session checkpoints to the `entire/checkpoints/v1` branch, and `git fetch` pulls in checkpoints from other contributors. Use `entire attach` or `entire rewind` to resume a teammate's session.
