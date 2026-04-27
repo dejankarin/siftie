@@ -386,17 +386,14 @@ function MockPromptsColumn() {
 // ---------------------------------------------------------------------------
 function SiteFooter() {
   return (
-    <footer className="border-t border-[var(--line-2)] mt-12 sm:mt-20">
-      <div className="mx-auto max-w-[1100px] px-5 sm:px-6 py-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <span className="relative h-[14px] w-[44px]" aria-hidden="true">
-            <img className="theme-logo-light h-full w-full object-contain" src={LIGHT_LOGO} alt="" />
-            <img className="theme-logo-dark h-full w-full object-contain" src={DARK_LOGO} alt="" />
-          </span>
-          <span className="text-[11.5px] text-[var(--ink-3)]">
-            © {new Date().getFullYear()} Siftie. Bring your own keys.
-          </span>
-        </div>
+    <footer
+      className="sticky bottom-0 z-30 backdrop-blur bg-[var(--bg)]/85 border-t border-[var(--line-2)]"
+      aria-label="Site footer"
+    >
+      <div className="mx-auto max-w-[1100px] px-5 sm:px-6 py-3 flex items-center justify-between gap-3">
+        <span className="text-[11.5px] text-[var(--ink-3)]">
+          © {new Date().getFullYear()} Siftie. Bring your own keys.
+        </span>
         <nav aria-label="Footer" className="flex items-center gap-4 text-[11.5px] text-[var(--ink-3)]">
           <Link href="/sign-up" className="hover:text-[var(--ink-2)] transition-colors">
             Sign up
