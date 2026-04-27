@@ -32,6 +32,11 @@
     --accent-softer: #f0f9ff;
     --focus-ring: #bae6fd;
 
+    /* Council (violet) — paired with the sky Chair so the two chips
+       sit together as a cool-tone family but are easy to distinguish. */
+    --council-soft: #ede9fe;
+    --council-ink: #6d28d9;
+
     /* Status */
     --success: oklch(65% 0.13 150);
     --success-ink: oklch(45% 0.13 150);
@@ -75,6 +80,9 @@
     --accent-soft: oklch(30% 0.06 240);
     --accent-softer: oklch(24% 0.04 240);
     --focus-ring: #1e3a5f;
+
+    --council-soft: oklch(30% 0.06 290);
+    --council-ink: #c4b5fd;
 
     --success: oklch(72% 0.14 150);
     --success-ink: oklch(80% 0.14 150);

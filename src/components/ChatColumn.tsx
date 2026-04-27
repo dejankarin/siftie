@@ -49,7 +49,7 @@ function MessageBubble({ msg }: { msg: Message }) {
         <div className="flex items-center gap-2 mb-1">
           <span className="text-[12px] font-medium text-[var(--ink)]">{name}</span>
           {chip === 'reviewer' && (
-            <span className="px-1.5 py-[1px] rounded-full text-[10px] font-medium uppercase tracking-wide bg-[var(--surface-3)] text-[var(--ink-3)]">
+            <span className="px-1.5 py-[1px] rounded-full text-[10px] font-medium uppercase tracking-wide bg-[var(--council-soft)] text-[var(--council-ink)]">
               Council
             </span>
           )}
