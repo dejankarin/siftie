@@ -97,6 +97,6 @@ export const SOURCE_TYPES: Record<
 > = {
   pdf: { label: 'PDF', dot: 'oklch(62% 0.14 25)' },
   url: { label: 'URL', dot: 'oklch(60% 0.10 240)' },
-  doc: { label: 'Word doc', dot: 'oklch(60% 0.10 150)' },
+  doc: { label: 'DOCX', dot: 'oklch(60% 0.10 150)' },
   md: { label: '.md', dot: 'oklch(55% 0.10 300)' },
 };

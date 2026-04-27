@@ -125,7 +125,7 @@ export function AddSourceModal({ open, initialTab = 'pdf', onClose, onAdd }: Add
   const tabs: { id: AddTab; label: string }[] = [
     { id: 'pdf', label: 'PDF' },
     { id: 'url', label: 'URL' },
-    { id: 'doc', label: 'Word doc' },
+    { id: 'doc', label: 'DOCX' },
     { id: 'md', label: '.md' },
   ];
 
