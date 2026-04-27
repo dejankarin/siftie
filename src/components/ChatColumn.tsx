@@ -2,11 +2,14 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { Message } from '../types';
 
 /**
- * Pick the label + chip color for a council bubble. Reviewers are
- * deliberately anonymised ("Reviewer 1") so users don't anchor on a
- * favourite model — the Council's value is in the disagreement, not
- * any one reviewer's identity. The Chair gets accent styling because
- * it's the synthesised verdict the user should focus on.
+ * Pick the label + chip color for a council bubble. We surface the
+ * underlying model alongside each reviewer so a verdict can be mapped
+ * back to its source. The original anti-anchoring concern (users
+ * gravitating to a favourite model) doesn't apply — model selection
+ * is fixed — and the disagreement between specific models is itself
+ * useful signal: it teaches users how each one tends to think about
+ * brand prompts. The Chair gets accent styling because it's the
+ * synthesised verdict the user should focus on.
  */
 function councilLabel(msg: Message): { name: string; chip: string | null } {
   if (msg.councilRole === 'reviewer' && msg.councilSeat) {
@@ -18,9 +21,28 @@ function councilLabel(msg: Message): { name: string; chip: string | null } {
   return { name: msg.role === 'agent' ? 'Siftie' : 'You', chip: null };
 }
 
+/**
+ * Mirrors COUNCIL_MODELS in lib/openrouter.ts. Reviewer 1/2/3 map
+ * to seats 1..3 in that array; Chair always uses seat 1's model.
+ * Hardcoded here because openrouter.ts is server-only.
+ */
+function councilModelLabel(msg: Message): string | null {
+  if (msg.councilRole === 'reviewer' && msg.councilSeat) {
+    switch (msg.councilSeat) {
+      case 1: return 'GPT-5.4 Mini';
+      case 2: return 'Gemini 2.5 Flash';
+      case 3: return 'Claude Haiku 4.5';
+      default: return null;
+    }
+  }
+  if (msg.councilRole === 'chair') return 'GPT-5.4 Mini';
+  return null;
+}
+
 function MessageBubble({ msg }: { msg: Message }) {
   const isAgent = msg.role === 'agent';
   const { name, chip } = councilLabel(msg);
+  const modelLabel = councilModelLabel(msg);
   return (
     <div className={`${isAgent ? '' : 'flex justify-end'}`}>
       <div className={`flex-1 min-w-0 ${isAgent ? '' : 'flex flex-col items-end'}`}>
@@ -34,6 +56,11 @@ function MessageBubble({ msg }: { msg: Message }) {
           {chip === 'chair' && (
             <span className="px-1.5 py-[1px] rounded-full text-[10px] font-medium uppercase tracking-wide bg-[var(--accent-soft)] text-[var(--accent-ink)]">
               Chair
+            </span>
+          )}
+          {modelLabel && (
+            <span className="px-1.5 py-[1px] rounded-full text-[10px] font-medium bg-[var(--surface-2)] text-[var(--ink-3)] border border-[var(--line)]">
+              {modelLabel}
             </span>
           )}
           <span className="text-[11px] text-[var(--ink-3)]">{msg.time}</span>
