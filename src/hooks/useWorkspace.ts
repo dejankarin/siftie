@@ -471,10 +471,44 @@ export interface UseWorkspaceOptions {
    */
   initialProjectId?: string;
   initialResearchId?: string;
+  /**
+   * Optional sink for save-status tracking. When provided, every
+   * non-GET fetch made through `trackedFetch` flips a counter so the
+   * TopBar can render "Saving…" / "Saved" / "Save failed".
+   */
+  saveStatus?: {
+    beginSave: () => void;
+    endSave: () => void;
+    errorSave: () => void;
+  };
 }
 
 export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult | null {
-  const { initialProjectId, initialResearchId } = opts;
+  const { initialProjectId, initialResearchId, saveStatus } = opts;
+  // Stable ref so trackedFetch always reads the latest controller
+  // without forcing every mutation site to re-bind on rerender.
+  const saveStatusRef = useRef(saveStatus);
+  saveStatusRef.current = saveStatus;
+  const trackedFetch = useCallback(
+    async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const isMutation = method !== 'GET' && method !== 'HEAD';
+      const sink = saveStatusRef.current;
+      if (isMutation) sink?.beginSave();
+      try {
+        const res = await globalThis.fetch(input, init);
+        if (isMutation) {
+          if (res.ok) sink?.endSave();
+          else sink?.errorSave();
+        }
+        return res;
+      } catch (err) {
+        if (isMutation) sink?.errorSave();
+        throw err;
+      }
+    },
+    [],
+  );
   // Capture the URL-provided ids exactly once — re-renders with the same
   // strings shouldn't retrigger the bootstrap fetch, and a parent that
   // memoises `opts` is not guaranteed.
@@ -524,7 +558,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/workspace', { method: 'GET' });
+        const res = await trackedFetch('/api/workspace', { method: 'GET' });
         if (!res.ok) throw new Error(`GET /api/workspace failed (${res.status})`);
         const api = (await res.json()) as ApiWorkspaceResponse;
         if (cancelled) return;
@@ -870,7 +904,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
 
     (async () => {
       try {
-        const res = await fetch('/api/projects', {
+        const res = await trackedFetch('/api/projects', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: finalName }),
@@ -929,7 +963,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
           }
         : s,
     );
-    void fetch(`/api/projects/${id}`, {
+    void trackedFetch(`/api/projects/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: trimmed }),
@@ -951,7 +985,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
       activeProjectId: fallbackProject.id,
       activeResearchId: fallbackResearch.id,
     });
-    void fetch(`/api/projects/${id}`, { method: 'DELETE' }).catch((err) =>
+    void trackedFetch(`/api/projects/${id}`, { method: 'DELETE' }).catch((err) =>
       console.error('[useWorkspace] deleteProject failed:', err),
     );
   }, []);
@@ -981,7 +1015,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
 
     (async () => {
       try {
-        const res = await fetch('/api/researches', {
+        const res = await trackedFetch('/api/researches', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectId: targetProjectId, name: finalName }),
@@ -1034,7 +1068,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
           }
         : s,
     );
-    void fetch(`/api/researches/${id}`, {
+    void trackedFetch(`/api/researches/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: trimmed }),
@@ -1066,8 +1100,8 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
 
       (async () => {
         try {
-          await fetch(`/api/researches/${id}`, { method: 'DELETE' });
-          const res = await fetch('/api/researches', {
+          await trackedFetch(`/api/researches/${id}`, { method: 'DELETE' });
+          const res = await trackedFetch('/api/researches', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ projectId, name: 'Untitled research' }),
@@ -1111,7 +1145,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
     const nextActiveResearchId =
       previous.activeResearchId === id ? sameProject[0]!.id : previous.activeResearchId;
     setState({ ...previous, researches: remaining, activeResearchId: nextActiveResearchId });
-    void fetch(`/api/researches/${id}`, { method: 'DELETE' }).catch((err) =>
+    void trackedFetch(`/api/researches/${id}`, { method: 'DELETE' }).catch((err) =>
       console.error('[useWorkspace] deleteResearch failed:', err),
     );
   }, []);
@@ -1160,7 +1194,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
     );
 
     try {
-      const persisted = await postSource(targetResearchId, payload);
+      const persisted = await postSource(trackedFetch, targetResearchId, payload);
       const client = apiSourceToClient(persisted);
       // Mark the real id as seen *before* mutating state so a Realtime
       // INSERT for the same row that arrives during the swap is treated
@@ -1233,7 +1267,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
     if (sourceId.startsWith('s_tmp_')) return;
 
     try {
-      const res = await fetch(`/api/sources/${sourceId}`, { method: 'DELETE' });
+      const res = await trackedFetch(`/api/sources/${sourceId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`DELETE /api/sources/${sourceId} failed (${res.status})`);
     } catch (err) {
       // Restore on failure so the user can retry.
@@ -1278,7 +1312,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
     );
 
     try {
-      const res = await fetch(`/api/sources/${sourceId}/reindex`, { method: 'POST' });
+      const res = await trackedFetch(`/api/sources/${sourceId}/reindex`, { method: 'POST' });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         const code = (body as { error?: string })?.error ?? 'unknown_error';
@@ -1366,7 +1400,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
     });
 
     try {
-      const res = await fetch('/api/messages', {
+      const res = await trackedFetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ researchId: targetResearchId, body: trimmed }),
@@ -1494,7 +1528,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
         : s,
     );
     try {
-      const res = await fetch('/api/research', {
+      const res = await trackedFetch('/api/research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ researchId: targetId }),
@@ -1576,7 +1610,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
         : s,
     );
     try {
-      await fetch('/api/research/cancel', {
+      await trackedFetch('/api/research/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ runId }),
@@ -1614,7 +1648,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
       err.code = 'no_run';
       throw err;
     }
-    const res = await fetch(
+    const res = await trackedFetch(
       `/api/runs/${encodeURIComponent(runId)}/refresh-hits`,
       {
         method: 'POST',
@@ -1708,22 +1742,26 @@ function optimisticTitle(payload: AddSourcePayload): string {
  * POST a new source to the API. JSON for url/md, multipart for pdf/doc.
  * Throws with `error.code` set to the server's stable code on non-2xx.
  */
-async function postSource(researchId: string, payload: AddSourcePayload): Promise<ApiSource> {
+async function postSource(
+  trackedFetch: typeof fetch,
+  researchId: string,
+  payload: AddSourcePayload,
+): Promise<ApiSource> {
   let res: Response;
   if (payload.kind === 'pdf' || payload.kind === 'doc') {
     const form = new FormData();
     form.set('researchId', researchId);
     form.set('kind', payload.kind);
     form.set('file', payload.file);
-    res = await fetch('/api/sources', { method: 'POST', body: form });
+    res = await trackedFetch('/api/sources', { method: 'POST', body: form });
   } else if (payload.kind === 'url') {
-    res = await fetch('/api/sources', {
+    res = await trackedFetch('/api/sources', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ researchId, kind: 'url', url: payload.url }),
     });
   } else {
-    res = await fetch('/api/sources', {
+    res = await trackedFetch('/api/sources', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

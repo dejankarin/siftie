@@ -13,6 +13,7 @@ import { ResearchNav } from './components/ResearchNav';
 import { SourcesColumn } from './components/SourcesColumn';
 import { Toast } from './components/Toast';
 import { TopBar } from './components/TopBar';
+import { useSaveStatus, type SaveStatus } from './hooks/useSaveStatus';
 import { useTheme } from './hooks/useTheme';
 import { useIsDesktop } from './hooks/useViewport';
 import { useWorkspace, type AddSourcePayload, type UseWorkspaceResult } from './hooks/useWorkspace';
@@ -37,7 +38,8 @@ type MobileTab = 'sources' | 'chat' | 'prompts';
  * stay rules-of-hooks-compliant.
  */
 export default function App({ initialProjectId, initialResearchId }: AppProps = {}) {
-  const ws = useWorkspace({ initialProjectId, initialResearchId });
+  const saveStatus = useSaveStatus();
+  const ws = useWorkspace({ initialProjectId, initialResearchId, saveStatus });
   if (!ws) {
     // CSS variables (--bg, --ink-2) cascade from the data-theme attribute
     // set on <html> by the bootstrap script in app/layout.tsx, so the
@@ -48,10 +50,10 @@ export default function App({ initialProjectId, initialResearchId }: AppProps = 
       </div>
     );
   }
-  return <AppContent ws={ws} />;
+  return <AppContent ws={ws} saveStatus={saveStatus.status} />;
 }
 
-function AppContent({ ws }: { ws: UseWorkspaceResult }) {
+function AppContent({ ws, saveStatus }: { ws: UseWorkspaceResult; saveStatus: SaveStatus }) {
   const isDesktop = useIsDesktop();
   const { theme, toggle: toggleTheme } = useTheme();
   const router = useRouter();
@@ -362,7 +364,7 @@ function AppContent({ ws }: { ws: UseWorkspaceResult }) {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
-      <TopBar theme={theme} onToggleTheme={toggleTheme} />
+      <TopBar theme={theme} onToggleTheme={toggleTheme} saveStatus={saveStatus} />
       <MobileTopBar tab={tab} theme={theme} onToggleTheme={toggleTheme} />
 
       {isDesktop ? (

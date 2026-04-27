@@ -1,6 +1,7 @@
 import { UserButton } from '@clerk/nextjs';
 import { KeyRound } from 'lucide-react';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import type { SaveStatus } from '../hooks/useSaveStatus';
 import type { Theme } from '../hooks/useTheme';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -10,9 +11,10 @@ const DARK_LOGO = '/logo/Siftie-logo-dark.svg';
 interface TopBarProps {
   theme: Theme;
   onToggleTheme: () => void;
+  saveStatus: SaveStatus;
 }
 
-export function TopBar({ theme, onToggleTheme }: TopBarProps) {
+export function TopBar({ theme, onToggleTheme, saveStatus }: TopBarProps) {
   const logo = theme === 'dark' ? DARK_LOGO : LIGHT_LOGO;
   const online = useOnlineStatus();
   return (
@@ -23,9 +25,7 @@ export function TopBar({ theme, onToggleTheme }: TopBarProps) {
           <img src={logo} alt="Siftie" style={{ height: '18px', width: 'auto' }} />
         </div>
         <div className="flex items-center gap-1.5">
-          <button type="button" className="btn-ghost px-2.5 py-1.5 text-[12.5px] text-[var(--ink-2)]">
-            Saved 2 min ago
-          </button>
+          <SaveStatusPill status={saveStatus} online={online} />
           <span className="w-px h-5 bg-[var(--line)] mx-1"></span>
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
           <span className="w-px h-5 bg-[var(--line)] mx-1"></span>
@@ -41,6 +41,28 @@ export function TopBar({ theme, onToggleTheme }: TopBarProps) {
         </div>
       </div>
     </header>
+  );
+}
+
+function SaveStatusPill({ status, online }: { status: SaveStatus; online: boolean }) {
+  // Offline always wins — if there's no network, no save can land,
+  // so reporting "Saved" or "Saving…" would be misleading.
+  const view = !online
+    ? { label: 'Offline', dotClass: 'bg-amber-500' }
+    : status === 'saving'
+      ? { label: 'Saving…', dotClass: 'bg-sky-500 animate-pulse' }
+      : status === 'error'
+        ? { label: 'Save failed', dotClass: 'bg-red-500' }
+        : { label: 'Saved', dotClass: 'bg-[var(--success)]' };
+  return (
+    <span
+      role="status"
+      aria-live="polite"
+      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12.5px] text-[var(--ink-2)]"
+    >
+      <span aria-hidden="true" className={`w-1.5 h-1.5 rounded-full ${view.dotClass}`} />
+      {view.label}
+    </span>
   );
 }
 
