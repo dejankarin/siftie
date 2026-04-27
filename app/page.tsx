@@ -390,24 +390,28 @@ function SiteFooter() {
       className="sticky bottom-0 z-30 backdrop-blur bg-[var(--bg)]/85 border-t border-[var(--line-2)]"
       aria-label="Site footer"
     >
-      <div className="mx-auto max-w-[1100px] px-5 sm:px-6 py-3 flex items-center justify-between gap-3">
-        <span className="text-[11.5px] text-[var(--ink-3)]">
-          © {new Date().getFullYear()} Siftie. Bring your own keys.
-        </span>
-        <nav aria-label="Footer" className="flex items-center gap-4 text-[11.5px] text-[var(--ink-3)]">
-          <Link href="/sign-up" className="hover:text-[var(--ink-2)] transition-colors">
-            Sign up
-          </Link>
-          <Link href="/sign-in" className="hover:text-[var(--ink-2)] transition-colors">
-            Log in
-          </Link>
+      <div className="mx-auto max-w-[1100px] px-5 sm:px-6 py-3 flex items-center justify-between gap-3 text-[12px] text-[var(--ink-2)]">
+        <span>© {new Date().getFullYear()} Siftie. All rights reserved.</span>
+        <span>
+          Built with ☕️ and ❤️ in Berlin by{' '}
           <a
-            href="mailto:hi@siftie.app"
-            className="hover:text-[var(--ink-2)] transition-colors"
+            href="https://www.annaagliardi.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline-offset-2 hover:underline hover:text-[var(--ink)] transition-colors"
           >
-            Contact
+            Anna Agliardi
           </a>
-        </nav>
+          {' & '}
+          <a
+            href="https://dejankarin.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline-offset-2 hover:underline hover:text-[var(--ink)] transition-colors"
+          >
+            Dejan Karin
+          </a>
+        </span>
       </div>
     </footer>
   );
