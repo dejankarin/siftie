@@ -85,31 +85,19 @@ function Hero() {
   return (
     <section className="px-5 sm:px-6 pt-12 sm:pt-20 pb-14 sm:pb-20">
       <div className="mx-auto max-w-[840px] flex flex-col items-center text-center gap-6">
-        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11.5px] font-medium bg-[var(--accent-soft)] text-[var(--accent-ink)]">
-          <span
-            className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]"
-            aria-hidden="true"
-          />
-          Now in early access
-        </span>
         <h1 className="font-[Inter] tracking-tight text-[var(--ink)] text-[34px] leading-[1.08] sm:text-[52px] sm:leading-[1.05] font-semibold max-w-[760px]">
           Your brand, in every AI answer.
         </h1>
         <p className="font-[Inter] text-[16px] sm:text-[18px] leading-[1.55] text-[var(--ink-2)] max-w-[640px]">
           Siftie builds and tests a prompt portfolio across different LLMs — from sources you already have. Drop in your brand brief, chat with the agent, and ship a tested set of prompts ready for ChatGPT, Gemini, Claude, and Perplexity.
         </p>
-        <div className="flex flex-col items-center gap-2.5 mt-2">
-          <Link
-            href="/sign-up"
-            className="inline-flex items-center gap-2 px-5 py-3 rounded-[12px] bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] font-semibold text-[14.5px] hover:bg-[var(--btn-primary-hover)] transition-colors shadow-[var(--shadow-card)]"
-          >
-            Get started — free with your own keys
-            <span aria-hidden="true">→</span>
-          </Link>
-          <p className="text-[12.5px] text-[var(--ink-3)] max-w-[460px]">
-            Bring your own AI provider keys — costs come out of your accounts, not ours.
-          </p>
-        </div>
+        <Link
+          href="/sign-up"
+          className="inline-flex items-center gap-2 px-5 py-3 mt-2 rounded-[12px] bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] font-semibold text-[14.5px] hover:bg-[var(--btn-primary-hover)] transition-colors shadow-[var(--shadow-card)]"
+        >
+          Get started — free with your own keys
+          <span aria-hidden="true">→</span>
+        </Link>
       </div>
     </section>
   );
