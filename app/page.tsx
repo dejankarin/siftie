@@ -61,13 +61,13 @@ function SiteNav() {
           <LandingThemeToggle />
           <Link
             href="/sign-in"
-            className="px-3 py-1.5 rounded-[10px] border border-[var(--line)] bg-[var(--surface)] text-[12.5px] font-medium text-[var(--ink-2)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] hover:border-[var(--line-strong)] transition-colors"
+            className="px-4 py-2 rounded-[10px] border border-[var(--line)] bg-[var(--surface)] text-[14px] font-medium text-[var(--ink-2)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] hover:border-[var(--line-strong)] transition-colors"
           >
             Log in
           </Link>
           <Link
             href="/sign-up"
-            className="hidden sm:inline-flex items-center px-3 py-1.5 rounded-[10px] bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] text-[12.5px] font-semibold hover:bg-[var(--btn-primary-hover)] transition-colors"
+            className="hidden sm:inline-flex items-center px-4 py-2 rounded-[10px] bg-[var(--btn-primary-bg)] text-[var(--btn-primary-fg)] text-[14px] font-semibold hover:bg-[var(--btn-primary-hover)] transition-colors"
           >
             Sign up
           </Link>
@@ -390,7 +390,7 @@ function SiteFooter() {
       className="sticky bottom-0 z-30 backdrop-blur bg-[var(--bg)]/85 border-t border-[var(--line-2)]"
       aria-label="Site footer"
     >
-      <div className="mx-auto max-w-[1100px] px-5 sm:px-6 py-3 flex items-center justify-between gap-3 text-[12px] text-[var(--ink-2)]">
+      <div className="mx-auto max-w-[1100px] px-5 sm:px-6 py-4 flex items-center justify-between gap-3 text-[14px] text-[var(--ink-2)]">
         <span>© {new Date().getFullYear()} Siftie. All rights reserved.</span>
         <span>
           Built with ☕️ and ❤️ in Berlin by{' '}
@@ -402,7 +402,7 @@ function SiteFooter() {
           >
             Anna Agliardi
           </a>
-          {' & '}
+          {' and '}
           <a
             href="https://dejankarin.com/"
             target="_blank"
