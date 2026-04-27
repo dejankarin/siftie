@@ -38,9 +38,9 @@
     --shimmer: oklch(94% 0.01 340);
 
     /* Buttons */
-    --btn-primary-bg: var(--ink);
+    --btn-primary-bg: oklch(46% 0.028 245);
     --btn-primary-fg: #ffffff;
-    --btn-primary-hover: oklch(28% 0.01 60);
+    --btn-primary-hover: oklch(38% 0.03 245);
     --btn-disabled-bg: oklch(94% 0.005 240);
     --btn-disabled-fg: var(--ink-3);
 
@@ -80,9 +80,9 @@
     --success-ink: oklch(80% 0.14 150);
     --shimmer: oklch(34% 0.02 240);
 
-    --btn-primary-bg: oklch(96% 0.005 240);
+    --btn-primary-bg: oklch(72% 0.04 240);
     --btn-primary-fg: oklch(15% 0.012 240);
-    --btn-primary-hover: oklch(86% 0.005 240);
+    --btn-primary-hover: oklch(80% 0.04 240);
     --btn-disabled-bg: oklch(28% 0.012 240);
     --btn-disabled-fg: oklch(55% 0.012 240);
 
