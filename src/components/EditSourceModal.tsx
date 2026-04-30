@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import type { Source } from '../types';
 
 interface EditSourceModalProps {
@@ -11,6 +12,8 @@ export function EditSourceModal({ source, onClose, onSave }: EditSourceModalProp
   const [title, setTitle] = useState('');
   const [meta, setMeta] = useState('');
   const [snippet, setSnippet] = useState('');
+
+  useBodyScrollLock(source !== null);
 
   useEffect(() => {
     if (source) {

@@ -367,7 +367,13 @@ function AppContent({ ws, saveStatus }: { ws: UseWorkspaceResult; saveStatus: Sa
   const renameOnMount = pendingRenameId === ws.activeResearch.id;
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
+    // h-dvh (dynamic viewport height) shrinks with the iOS / Android
+    // soft keyboard so the chat composer stays visible above it. The
+    // older h-screen (= 100vh) anchored to the LARGE viewport, which
+    // meant the composer slid behind the keyboard on touch devices.
+    // Tailwind 3.4+ ships h-dvh; on Safari < 15.4 it gracefully falls
+    // back to 100vh — same as before, never worse.
+    <div className="h-dvh flex flex-col overflow-hidden">
       <TopBar theme={theme} onToggleTheme={toggleTheme} saveStatus={saveStatus} />
       <MobileTopBar tab={tab} theme={theme} onToggleTheme={toggleTheme} />
 

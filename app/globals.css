@@ -283,6 +283,15 @@
   .btn-primary:active {
     transform: translateY(1px);
   }
+  /* Keyboard-only focus ring shared by every .btn-primary / .btn-ghost.
+     `:focus-visible` (vs `:focus`) keeps the ring out of mouse-click
+     interactions on browsers that distinguish — minimises noise for
+     pointer users while preserving the cue for tab/keyboard nav. */
+  .btn-primary:focus-visible,
+  .btn-ghost:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--focus-ring);
+  }
   .btn-ghost {
     border-radius: 12px;
     transition: background-color 0.15s ease;

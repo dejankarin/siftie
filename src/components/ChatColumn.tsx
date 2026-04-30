@@ -199,6 +199,33 @@ export function ChatColumn({
     el.style.height = Math.min(el.scrollHeight, 140) + 'px';
   };
 
+  /**
+   * iOS Safari and (less reliably) Android Chrome don't always slide a
+   * focused textarea into view when the soft keyboard appears — the
+   * dvh outer container shrinks, but the page's existing scroll
+   * offset can leave the composer just below the visible fold.
+   *
+   * After focus lands, wait a beat for the keyboard animation to
+   * finish, then nudge the composer into view. `block: 'end'` keeps
+   * the most-recently-typed line above the keyboard rather than the
+   * top of the textarea (which on long drafts would push the cursor
+   * off-screen).
+   *
+   * Wrapping in `requestAnimationFrame` + a 250ms delay matches the
+   * iOS keyboard transition; running scrollIntoView immediately on
+   * focus often runs before the viewport has resized and overshoots.
+   */
+  const onFocus = () => {
+    if (typeof window === 'undefined') return;
+    const el = taRef.current;
+    if (!el) return;
+    window.setTimeout(() => {
+      requestAnimationFrame(() => {
+        el.scrollIntoView({ block: 'end', behavior: 'smooth' });
+      });
+    }, 250);
+  };
+
   return (
     <section className="flex flex-col h-full min-h-0">
       <header className="px-5 pt-5 pb-3 border-b border-[var(--line-2)]">
@@ -235,6 +262,7 @@ export function ChatColumn({
             value={draft}
             onChange={onInput}
             onKeyDown={onKeyDown}
+            onFocus={onFocus}
             rows={1}
             placeholder="Reply to Siftie…"
             aria-label="Message Siftie"

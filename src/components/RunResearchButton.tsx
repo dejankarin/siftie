@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useIsCoarsePointer } from '../hooks/useViewport';
 
 /**
  * Run / Stop control for a research pipeline. The same component drives
@@ -7,7 +8,9 @@ import { useState } from 'react';
  *
  * Visual states:
  *   - `disabled` → muted pill, can't click
- *   - `pending` / `running` → spinner + "Working…", morphs to "Stop" on hover
+ *   - `pending` / `running` → spinner + "Working…", morphs to "Stop" on
+ *     hover/focus on desktop. On touch (no hover) we render "Stop"
+ *     immediately so the cancel affordance is actually discoverable.
  *   - `failed` → "Retry research" outline pill
  *   - `complete` / null → primary `primaryLabel` pill
  *
@@ -32,6 +35,10 @@ export function RunResearchButton({
   const busy = status === 'pending' || status === 'running';
   const failed = status === 'failed';
   const [hoverStop, setHoverStop] = useState(false);
+  const coarsePointer = useIsCoarsePointer();
+  // On touch screens the hover-only morph is invisible — show Stop
+  // immediately so users can actually discover the cancel affordance.
+  const showStop = hoverStop || coarsePointer;
 
   if (busy) {
     return (
@@ -44,14 +51,14 @@ export function RunResearchButton({
         onBlur={() => setHoverStop(false)}
         title="Stop the current research run"
         aria-label="Stop research run"
-        className={`rounded-full px-3.5 h-8 text-[12px] font-medium transition flex items-center gap-1.5
+        className={`rounded-full px-3.5 h-8 text-[12px] font-medium transition flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]
           ${
-            hoverStop
+            showStop
               ? 'border border-[var(--line)] bg-[var(--surface)] text-[var(--ink)] hover:border-[var(--accent)] cursor-pointer'
               : 'bg-[var(--btn-disabled-bg)] text-[var(--btn-disabled-fg)] cursor-pointer'
           } ${className}`.trim()}
       >
-        {hoverStop ? (
+        {showStop ? (
           <>
             <span aria-hidden="true" className="w-2.5 h-2.5 rounded-[2px] bg-current"></span>
             Stop

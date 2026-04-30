@@ -9,6 +9,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import type { Project, Research } from '../types';
 
 function dateLabel(timestamp: number): string {
@@ -158,6 +159,8 @@ function ProjectsPanel(props: ProjectsPanelProps) {
   const [rename, setRename] = useState<RenameTarget | null>(null);
   const [draftName, setDraftName] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
+
+  useBodyScrollLock(open);
 
   useEffect(() => {
     if (!open) {

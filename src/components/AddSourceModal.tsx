@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from 'react';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import type { AddSourcePayload } from '../hooks/useWorkspace';
 
 type AddTab = 'pdf' | 'url' | 'doc' | 'md';
@@ -26,6 +27,8 @@ export function AddSourceModal({ open, initialTab = 'pdf', onClose, onAdd }: Add
   const [error, setError] = useState<string | null>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
+
+  useBodyScrollLock(open);
 
   useEffect(() => {
     if (open) {

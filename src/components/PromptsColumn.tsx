@@ -5,11 +5,13 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
 } from 'react';
 import posthog from 'posthog-js';
 import { ChevronDown, FileDown, RefreshCw, Sparkles, X } from 'lucide-react';
 import { PROMPT_FILTERS } from '../data/mock';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import type { PortfolioPrompt, PromptCluster, PromptFilter, RunChannel } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -225,6 +227,7 @@ function ShowAllDrawer({
   canExport: boolean;
 }) {
   const labelId = useId();
+  useBodyScrollLock(open);
 
   useEffect(() => {
     if (!open) return;
@@ -259,17 +262,17 @@ function ShowAllDrawer({
               type="button"
               onClick={onExportCsv}
               disabled={!canExport || exporting}
-              className="btn-ghost px-2 py-1 rounded-md text-[11.5px] text-[var(--ink-2)] hover:text-[var(--ink)] flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn-ghost min-h-[44px] px-3 py-2 rounded-md text-[12px] text-[var(--ink-2)] hover:text-[var(--ink)] flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
               title={canExport ? 'Export prompt portfolio as CSV' : 'Available once your run finishes.'}
             >
               {exporting ? (
                 <>
-                  <span className="w-2.5 h-2.5 rounded-full border border-[var(--accent)] border-t-transparent animate-spin" />
+                  <span className="w-3 h-3 rounded-full border border-[var(--accent)] border-t-transparent animate-spin" />
                   <span>Exporting…</span>
                 </>
               ) : (
                 <>
-                  <FileDown size={13} strokeWidth={1.8} aria-hidden="true" />
+                  <FileDown size={14} strokeWidth={1.8} aria-hidden="true" />
                   <span>Export CSV</span>
                 </>
               )}
@@ -278,7 +281,7 @@ function ShowAllDrawer({
               type="button"
               onClick={onClose}
               aria-label="Close"
-              className="btn-ghost p-1.5 rounded-full text-[var(--ink-3)] hover:text-[var(--ink)]"
+              className="btn-ghost min-h-[44px] min-w-[44px] p-2 rounded-full text-[var(--ink-3)] hover:text-[var(--ink)] flex items-center justify-center"
             >
               <X size={16} strokeWidth={1.8} aria-hidden="true" />
             </button>
@@ -347,21 +350,87 @@ function GenerateClusterPopover({
   onPick: (cluster: PromptCluster) => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  // Refs for each menuitem button so keyboard-arrow nav can focus the
+  // right item by index. Sized to match the static `choices` array
+  // declared below — kept as `null` slots until the items mount.
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  // Snapshot of `document.activeElement` at the moment the popover
+  // opened. We restore focus to it on close so keyboard users land
+  // back on the trigger button instead of losing their place to
+  // <body>. Captured via activeElement (rather than a triggerRef
+  // prop) so this component stays drop-in for any caller.
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     if (!open) return;
+
+    // Snapshot the element that was focused when we opened, then
+    // move focus into the menu. WAI-ARIA's menu pattern wants initial
+    // focus on the first menuitem so screen-reader users hear the
+    // available options immediately.
+    previouslyFocusedRef.current =
+      typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    requestAnimationFrame(() => {
+      itemRefs.current[0]?.focus();
+    });
+
     const onClick = (e: globalThis.MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
     };
     window.addEventListener('mousedown', onClick);
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('mousedown', onClick);
       window.removeEventListener('keydown', onKey);
+      // Restore focus to wherever we came from. We do this in the
+      // cleanup so it runs every time `open` flips false (Escape,
+      // outside click, item pick, or unmount) without each path
+      // having to remember to call it.
+      const target = previouslyFocusedRef.current;
+      previouslyFocusedRef.current = null;
+      if (target && document.body.contains(target)) {
+        target.focus();
+      }
     };
   }, [open, onClose]);
+
+  /**
+   * Roving-focus inside the menu. ArrowDown / ArrowUp cycle, Home /
+   * End jump to ends. Tab / Shift+Tab close the menu and let the
+   * browser advance to the next tab stop naturally — that's the
+   * `role="menu"` convention rather than trapping Tab inside.
+   */
+  const onMenuKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const items = itemRefs.current.filter((b): b is HTMLButtonElement => b !== null);
+    if (items.length === 0) return;
+    const currentIdx = items.findIndex((b) => b === document.activeElement);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = currentIdx < 0 ? 0 : (currentIdx + 1) % items.length;
+      items[next]!.focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev =
+        currentIdx <= 0 ? items.length - 1 : currentIdx - 1;
+      items[prev]!.focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      items[0]!.focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      items[items.length - 1]!.focus();
+    } else if (e.key === 'Tab') {
+      onClose();
+    }
+  };
 
   if (!open) return null;
 
@@ -386,8 +455,10 @@ function GenerateClusterPopover({
   return (
     <div
       ref={ref}
+      onKeyDown={onMenuKeyDown}
       className="absolute right-0 top-9 z-20 w-72 rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-lg p-1.5 anim-fade-in"
       role="menu"
+      aria-label="Generate a new prompt cluster"
     >
       <div className="px-2 pt-1 pb-2 border-b border-[var(--line-2)]">
         <p className="text-[11.5px] font-semibold text-[var(--ink-2)]">Generate a new cluster</p>
@@ -396,16 +467,19 @@ function GenerateClusterPopover({
         </p>
       </div>
       <div className="py-1">
-        {choices.map((c) => (
+        {choices.map((c, idx) => (
           <button
             key={c.cluster}
             type="button"
             role="menuitem"
+            ref={(el) => {
+              itemRefs.current[idx] = el;
+            }}
             onClick={() => {
               onPick(c.cluster);
               onClose();
             }}
-            className="w-full text-left px-2 py-1.5 rounded-md hover:bg-[var(--surface-2)] flex items-start gap-2"
+            className="w-full text-left px-2 py-1.5 rounded-md hover:bg-[var(--surface-2)] focus:outline-none focus-visible:bg-[var(--surface-2)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] flex items-start gap-2"
           >
             <ClusterDot cluster={c.cluster} />
             <div className="min-w-0">
