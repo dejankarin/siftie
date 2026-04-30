@@ -182,6 +182,14 @@ export async function runResearchPipeline(
   const ph = getPostHogServer();
   const traceId = `research_${runId}`;
 
+  // Tracks whether a per-stage failure bubble already landed in the
+  // chat. The outer catch reads this so it can emit a generic fallback
+  // bubble if a throw escaped before any stage got the chance to
+  // narrate (e.g. keys yanked between precheck and orchestrator start,
+  // setup DB error, surface-stage write failure). Without the fallback
+  // the user sees the run flip to "failed" with no chat context.
+  let failureBubbleEmitted = false;
+
   try {
     // -----------------------------------------------------------------
     // Setup: keys + research metadata + chat transcript + sources
@@ -330,6 +338,7 @@ export async function runResearchPipeline(
         });
       }
       await emitAgentMessage(clerkUserId, researchId, runId, { body });
+      failureBubbleEmitted = true;
       throw err;
     }
 
@@ -353,6 +362,7 @@ export async function runResearchPipeline(
       await emitAgentMessage(clerkUserId, researchId, runId, {
         body: `${ideateProviderLabel(ideate.providerUsed)} returned no candidate prompts — please try again.`,
       });
+      failureBubbleEmitted = true;
       throw researchError('empty_ideate', 'Ideate returned no candidate prompts');
     }
 
@@ -390,9 +400,19 @@ export async function runResearchPipeline(
       totalChannels = peec.totalChannels;
       runChannels = peec.channels;
       if (totalChannels > 0) {
-        await emitAgentMessage(clerkUserId, researchId, runId, {
-          body: `Peec scored each prompt across ${totalChannels} live channels.`,
-        });
+        if (peec.baselineDegraded) {
+          // Channel discovery worked but the brand-mention report
+          // failed. Narrate this honestly — without it the user sees
+          // "Peec scored each prompt across N channels" while every
+          // prompt actually shows 0/N and they assume Peec lied.
+          await emitAgentMessage(clerkUserId, researchId, runId, {
+            body: `Peec found ${totalChannels} live channels, but the brand-mention lookup didn't return — showing 0 / ${totalChannels} hits for this run. Hit Refresh hits in the Prompts column once Peec is responding again.`,
+          });
+        } else {
+          await emitAgentMessage(clerkUserId, researchId, runId, {
+            body: `Peec scored each prompt across ${totalChannels} live channels.`,
+          });
+        }
       } else {
         peecSkipped = true;
         peecSkipReason = 'Peec returned no live channels for this project.';
@@ -436,23 +456,33 @@ export async function runResearchPipeline(
     const sourcesBlob = renderSourcesBlob(sources);
     const transcriptBlob = renderTranscriptBlob(conversationForLlm);
 
-    const council = await runCouncil(
-      candidates,
-      effectiveCouncilDepth,
-      {
-        apiKey: openrouterKey,
-        researchTitle: research.name,
-        sourcesBlob,
-        transcriptBlob,
-        posthog: {
-          distinctId: clerkUserId,
-          traceId,
-          privacyMode,
+    let council: Awaited<ReturnType<typeof runCouncil>>;
+    try {
+      council = await runCouncil(
+        candidates,
+        effectiveCouncilDepth,
+        {
+          apiKey: openrouterKey,
+          researchTitle: research.name,
+          sourcesBlob,
+          transcriptBlob,
+          posthog: {
+            distinctId: clerkUserId,
+            traceId,
+            privacyMode,
+          },
+          checkCancelled: () => throwIfCancelled(runId),
         },
-        checkCancelled: () => throwIfCancelled(runId),
-      },
-      councilEmit,
-    );
+        councilEmit,
+      );
+    } catch (err) {
+      // runCouncil emits per-reviewer and Chair failure bubbles before
+      // re-throwing, so the user already has chat context. Mark the
+      // outer fallback as covered so we don't pile a redundant generic
+      // "run aborted" bubble on top.
+      if (!(err instanceof RunCancelledError)) failureBubbleEmitted = true;
+      throw err;
+    }
 
     await throwIfCancelled(runId);
 
@@ -514,17 +544,36 @@ export async function runResearchPipeline(
       });
       return;
     }
-    // Mark the run failed and capture a telemetry event. We've already
-    // emitted a chat bubble inside the throwing branch; failing here
-    // only persists the run state so the prompts column doesn't show
-    // a stale "running" badge forever.
-    await failRun(runId).catch((failErr) => {
-      log.error('research.run.fail_persist_failed', {
+    // Mark the run failed and capture a telemetry event. We've usually
+    // emitted a chat bubble inside the throwing branch; if not (e.g.
+    // setup error before the opener, surface-stage write failure), we
+    // emit a generic fallback bubble here so the row doesn't flip to
+    // "failed" with zero chat context.
+    if (!failureBubbleEmitted) {
+      const code = err instanceof Error ? (err.cause as string | undefined) : undefined;
+      const fallbackBody = fallbackFailureBody(code, err);
+      await emitAgentMessage(clerkUserId, researchId, runId, {
+        body: fallbackBody,
+      }).catch((emitErr) => {
+        log.error('research.run.fallback_bubble_failed', {
+          run_id: runId,
+          research_id: researchId,
+          error: emitErr,
+        });
+      });
+    }
+
+    // Persist the failed status so the prompts column doesn't show a
+    // stale "running" badge forever. A single transient DB blip used
+    // to leave the row stuck — retry a couple of times with a small
+    // backoff before giving up so the orchestrator can self-heal.
+    const persisted = await failRunWithRetry(runId, researchId);
+    if (!persisted) {
+      log.error('research.run.fail_persist_exhausted', {
         run_id: runId,
         research_id: researchId,
-        error: failErr,
       });
-    });
+    }
     const code = err instanceof Error ? (err.cause as string | undefined) : undefined;
     log.error('research.run.failed', {
       run_id: runId,
@@ -578,6 +627,14 @@ interface FetchPeecHitsResult {
    * Peec was skipped or returned no active channels.
    */
   channels: Array<{ id: string; description: string }>;
+  /**
+   * True when channel discovery succeeded but the brand-mention
+   * lookup itself failed and we silently fell back to 0 hits. The
+   * orchestrator uses this to narrate the degradation honestly
+   * (instead of telling the user "Peec scored each prompt across N
+   * channels" while every prompt actually shows 0 / N).
+   */
+  baselineDegraded: boolean;
 }
 
 /**
@@ -620,7 +677,7 @@ async function fetchPeecHits(
 
   const projects = await listProjects(peecKey, tracking);
   if (projects.length === 0) {
-    return { hitsByIndex: {}, totalChannels: 0, channels: [] };
+    return { hitsByIndex: {}, totalChannels: 0, channels: [], baselineDegraded: false };
   }
   const project = projects[0]!;
 
@@ -639,7 +696,7 @@ async function fetchPeecHits(
     description: c.description,
   }));
   if (!ownBrand || totalChannels === 0) {
-    return { hitsByIndex: {}, totalChannels, channels: channelLabels };
+    return { hitsByIndex: {}, totalChannels, channels: channelLabels, baselineDegraded: false };
   }
 
   // Pull a 30-day brands report scoped to our own brand × channel. We
@@ -647,7 +704,7 @@ async function fetchPeecHits(
   // we apply to every candidate prompt as a portfolio baseline.
   const since = new Date();
   since.setDate(since.getDate() - 30);
-  const baselineChannels = await fetchBaselineChannels({
+  const baseline = await fetchBaselineChannels({
     apiKey: peecKey,
     projectId: project.id,
     brandId: ownBrand.id,
@@ -658,9 +715,14 @@ async function fetchPeecHits(
 
   const hitsByIndex: Record<number, number> = {};
   for (let i = 0; i < _candidates.length; i++) {
-    hitsByIndex[i] = baselineChannels;
+    hitsByIndex[i] = baseline.count;
   }
-  return { hitsByIndex, totalChannels, channels: channelLabels };
+  return {
+    hitsByIndex,
+    totalChannels,
+    channels: channelLabels,
+    baselineDegraded: baseline.degraded,
+  };
 }
 
 /**
@@ -680,7 +742,7 @@ async function fetchBaselineChannels(args: {
     posthogProperties?: Record<string, unknown>;
     posthogGroups?: Record<string, string>;
   };
-}): Promise<number> {
+}): Promise<{ count: number; degraded: boolean }> {
   const { apiKey, projectId, brandId, since, activeChannels, tracking } = args;
   const channelIds = activeChannels.map((c) => c.id);
   const startDate = since.toISOString().slice(0, 10);
@@ -717,12 +779,18 @@ async function fetchBaselineChannels(args: {
         0;
       if (mentions > 0) count += 1;
     }
-    return count;
+    return { count, degraded: false };
   } catch (err) {
-    // Don't propagate — caller already protects against partial Peec
-    // failures by marking the whole run as peecSkipped.
-    console.warn('[research] peec baseline channels lookup failed', err);
-    return 0;
+    // Don't propagate — channel discovery already succeeded, so we'd
+    // rather show 0 hits across N labelled channels than throw the
+    // whole run away. The `degraded` flag tells the orchestrator to
+    // narrate the silent fallback honestly instead of pretending the
+    // baseline lookup succeeded.
+    log.warn('research.peec.baseline_lookup_failed', {
+      error_message: err instanceof Error ? err.message : String(err),
+      total_channels: activeChannels.length,
+    });
+    return { count: 0, degraded: true };
   }
 }
 
@@ -788,6 +856,67 @@ function researchError(code: string, message: string): Error {
   const err = new Error(message);
   (err as Error & { cause: string }).cause = code;
   return err;
+}
+
+/**
+ * Generic chat-bubble copy used by the outer catch when no stage-specific
+ * failure bubble landed before the throw. The branches mirror the
+ * `researchError` codes so users see actionable copy when a missing-key
+ * race condition trips the orchestrator's defensive precheck.
+ */
+function fallbackFailureBody(code: string | undefined, err: unknown): string {
+  if (code === 'missing_ideate_key') {
+    return 'Run aborted — your OpenAI / Gemini key was removed or invalid before the run started. Add a key in Settings → API Keys, then hit Retry research.';
+  }
+  if (code === 'missing_openrouter_key') {
+    return 'Run aborted — your OpenRouter key was removed or invalid before the run started. Add a key in Settings → API Keys, then hit Retry research.';
+  }
+  if (code === 'no_sources') {
+    return 'Run aborted — no sources are attached to this research. Add at least one in the Sources column, then hit Retry research.';
+  }
+  const detail = err instanceof Error && err.message ? ` (${shortenErrorMessage(err.message)})` : '';
+  return `Run aborted because of an unexpected error${detail}. Check Settings → API Keys and source health, then hit Retry research.`;
+}
+
+function shortenErrorMessage(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length <= 140) return trimmed;
+  return `${trimmed.slice(0, 140)}…`;
+}
+
+/**
+ * Persist `runs.status = 'failed'` with a short retry loop so a single
+ * transient DB blip doesn't strand the row in `running` forever (the UI
+ * watches that column and will spin indefinitely). Three attempts with
+ * a small linear backoff is enough to ride out a routine connection
+ * recycle without measurably delaying the cleanup path.
+ */
+async function failRunWithRetry(runId: string, researchId: string): Promise<boolean> {
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await failRun(runId);
+      if (attempt > 1) {
+        log.info('research.run.fail_persisted_after_retry', {
+          run_id: runId,
+          research_id: researchId,
+          attempts: attempt,
+        });
+      }
+      return true;
+    } catch (err) {
+      log.error('research.run.fail_persist_attempt', {
+        run_id: runId,
+        research_id: researchId,
+        attempt,
+        error: err,
+      });
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+      }
+    }
+  }
+  return false;
 }
 
 /**

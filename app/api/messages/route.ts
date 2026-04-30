@@ -489,20 +489,29 @@ async function handleReplyRouter(ctx: ReplyRouterContext): Promise<Response> {
         },
       });
       // Persist a follow-up so the user understands why the run
-      // they just confirmed didn't actually start.
-      await createMessage(userId, {
-        researchId,
+      // they just confirmed didn't actually start. Use the retry
+      // helper instead of letting a persist failure 500 the POST —
+      // the user already got the lead-in bubble at line 435; a 500
+      // here would erase their typing-dots context AND their reason.
+      const followupBody = `I couldn't start the run — ${reason}. ${
+        cause === 'no_sources'
+          ? 'Add at least one source first.'
+          : cause === 'missing_ideate_key'
+            ? 'Add an OpenAI or Gemini key in Settings.'
+            : cause === 'missing_openrouter_key'
+              ? 'Add your OpenRouter key in Settings.'
+              : 'Try again in a moment.'
+      }`;
+      const persisted = await persistFollowupBubbleWithRetry(userId, researchId, {
         role: 'agent',
-        body: `I couldn't start the run — ${reason}. ${
-          cause === 'no_sources'
-            ? 'Add at least one source first.'
-            : cause === 'missing_ideate_key'
-              ? 'Add an OpenAI or Gemini key in Settings.'
-              : cause === 'missing_openrouter_key'
-                ? 'Add your OpenRouter key in Settings.'
-                : 'Try again in a moment.'
-        }`,
+        body: followupBody,
       });
+      if (!persisted) {
+        console.error(
+          '[api/messages] run_research failure bubble persistence exhausted retries',
+          { research_id: researchId },
+        );
+      }
     }
   }
 
@@ -608,15 +617,52 @@ async function runWebSearchFollowup(ctx: WebSearchFollowupContext): Promise<void
       research_id: ctx.researchId,
       $ai_trace_id: ctx.traceId,
     });
-    // Best-effort follow-up so the user sees a closing message.
-    try {
-      await createMessage(ctx.userId, {
-        researchId: ctx.researchId,
-        role: 'agent',
-        body: `I couldn't finish the web search — ${classified.message}`,
-      });
-    } catch (followErr) {
-      console.error('[api/messages] failed to persist websearch failure bubble', followErr);
+    // Follow-up so the user always sees a closing message. The first
+    // attempt usually succeeds, but a transient DB blip used to leave
+    // the typing dots and the lead-in bubble dangling forever (only a
+    // console.error in logs). Retry with a small linear backoff so we
+    // ride out routine connection recycles.
+    const persisted = await persistFollowupBubbleWithRetry(ctx.userId, ctx.researchId, {
+      role: 'agent',
+      body: `I couldn't finish the web search — ${classified.message}`,
+    });
+    if (!persisted) {
+      console.error(
+        '[api/messages] websearch failure bubble persistence exhausted retries',
+        { research_id: ctx.researchId },
+      );
     }
   }
+}
+
+/**
+ * Best-effort `createMessage` retry used by waitUntil follow-up paths
+ * (web search summary, run-research lead-in failure). The tradeoff:
+ * spending up to ~1.2s on retries is much better than leaving the user
+ * staring at a stranded "Searching the web…" lead-in bubble with no
+ * closing line — those are the cases where a missed bubble pairs with
+ * stuck typing dots and produces an apparent dead-end.
+ */
+async function persistFollowupBubbleWithRetry(
+  userId: string,
+  researchId: string,
+  payload: { role: 'agent'; body: string; runId?: string },
+): Promise<boolean> {
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await createMessage(userId, { researchId, ...payload });
+      return true;
+    } catch (err) {
+      console.error('[api/messages] follow-up bubble persist failed', {
+        research_id: researchId,
+        attempt,
+        error: err,
+      });
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+      }
+    }
+  }
+  return false;
 }

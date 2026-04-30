@@ -478,6 +478,12 @@ export function PromptsColumn({
   const [showAll, setShowAll] = useState(false);
   const [clusterPopoverOpen, setClusterPopoverOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // After a successful refresh we lock the button for a short cooldown
+  // so impatient repeat-clicks don't fire back-to-back Peec lookups
+  // and surface flaky 429s. Reset to 0 when the user switches research
+  // or the run changes (latestRunId effect below).
+  const [cooldownUntilMs, setCooldownUntilMs] = useState(0);
+  const [cooldownNow, setCooldownNow] = useState(0);
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
   // Reset transient drawer / popover state when switching researches.
@@ -486,7 +492,31 @@ export function PromptsColumn({
     setClusterPopoverOpen(false);
     setFilter('All');
     setSort('Cluster');
+    setCooldownUntilMs(0);
   }, [researchId]);
+
+  // Tick `cooldownNow` while a cooldown is active so the button label
+  // updates each second. Stops the interval as soon as the cooldown
+  // window expires to avoid wasted re-renders on every tick.
+  useEffect(() => {
+    if (cooldownUntilMs <= Date.now()) return;
+    setCooldownNow(Date.now());
+    const interval = setInterval(() => {
+      const now = Date.now();
+      if (now >= cooldownUntilMs) {
+        setCooldownNow(now);
+        clearInterval(interval);
+        return;
+      }
+      setCooldownNow(now);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [cooldownUntilMs]);
+
+  const refreshCooldownActive = cooldownUntilMs > cooldownNow;
+  const refreshCooldownSecondsLeft = refreshCooldownActive
+    ? Math.max(1, Math.ceil((cooldownUntilMs - cooldownNow) / 1000))
+    : 0;
 
   // Hydrate the dismissed state from localStorage per research. Stored
   // per-research so dismissing on one project doesn't hide the banner
@@ -592,10 +622,16 @@ export function PromptsColumn({
 
   const doRefreshHits = useCallback(async () => {
     if (refreshing) return;
+    if (cooldownUntilMs > Date.now()) return;
     setRefreshing(true);
     try {
       await onRefreshHits();
       onToast('Hits refreshed');
+      // 20s cooldown after a successful refresh — long enough to avoid
+      // tripping Peec rate limits on impatient repeat-clicks, short
+      // enough that a legitimate retry isn't blocked. The same lock
+      // is what the button surfaces as a "Cool down · Ns" countdown.
+      setCooldownUntilMs(Date.now() + 20_000);
     } catch (err) {
       const maybe = err as Error & { code?: string };
       if (maybe.code === 'missing_peec_key') {
@@ -609,7 +645,7 @@ export function PromptsColumn({
     } finally {
       setRefreshing(false);
     }
-  }, [onRefreshHits, onToast, refreshing]);
+  }, [onRefreshHits, onToast, refreshing, cooldownUntilMs]);
 
   const doGenerateCluster = useCallback(
     async (cluster: PromptCluster) => {
@@ -852,12 +888,19 @@ export function PromptsColumn({
             <button
               type="button"
               onClick={() => void doRefreshHits()}
-              disabled={refreshing || runStatus !== 'complete' || prompts.length === 0}
+              disabled={
+                refreshing ||
+                refreshCooldownActive ||
+                runStatus !== 'complete' ||
+                prompts.length === 0
+              }
               className="shrink-0 btn-ghost px-2.5 py-1 rounded-md text-[11.5px] text-[var(--ink-2)] flex items-center gap-1.5 hover:bg-[var(--surface-3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               title={
                 runStatus !== 'complete'
                   ? 'Available once your run finishes.'
-                  : 'Re-fetch the Peec brand-mention baseline for every prompt in this run.'
+                  : refreshCooldownActive
+                    ? `Wait ${refreshCooldownSecondsLeft}s before refreshing again to stay under Peec's rate limit.`
+                    : 'Re-fetch the Peec brand-mention baseline for every prompt in this run.'
               }
             >
               {refreshing ? (
@@ -865,7 +908,11 @@ export function PromptsColumn({
               ) : (
                 <RefreshCw size={13} strokeWidth={1.8} aria-hidden="true" />
               )}
-              {refreshing ? 'Refreshing…' : 'Refresh hits'}
+              {refreshing
+                ? 'Refreshing…'
+                : refreshCooldownActive
+                  ? `Cool down · ${refreshCooldownSecondsLeft}s`
+                  : 'Refresh hits'}
             </button>
           )}
           <div className="shrink-0 relative">

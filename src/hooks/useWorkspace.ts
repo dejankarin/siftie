@@ -529,6 +529,11 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
   const [pendingMessageResearchIds, setPendingMessageResearchIds] = useState<Set<string>>(
     () => new Set(),
   );
+  // Tracks when each research's typing-dots were activated so a missed
+  // Realtime INSERT can't strand the spinner forever. The Set above is
+  // canonical; this Map is a parallel index used only by the sweep
+  // effect below. Updated alongside every add/remove of the Set.
+  const pendingTypingStartedRef = useRef<Map<string, number>>(new Map());
 
   // Track every message id we've already inserted into local state so
   // the Realtime handler can dedupe rows that also arrived via a POST
@@ -756,6 +761,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
                 next.delete(row.research_id);
                 return next;
               });
+              pendingTypingStartedRef.current.delete(row.research_id);
             }
           },
         )
@@ -836,6 +842,43 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
       if (channel && supabase) supabase.removeChannel(channel);
     };
   }, [supabase]);
+
+  // -------------------------------------------------------------------------
+  // Stranded-typing-dots watchdog. The chat composer's typing indicator
+  // is normally cleared by an agent-message INSERT arriving over
+  // Realtime; if that event is dropped (network blip, subscription
+  // lost during a long-tab background, etc.), the spinner used to spin
+  // forever and the user had no way to recover without a hard reload.
+  //
+  // The sweep runs every 30s, looks at how long each pending entry
+  // has been in flight, and clears anything past MAX_TYPING_MS. The
+  // ceiling is set high enough to cover even the slowest Council depth
+  // (full reviewer + Chair < 3 min in practice) plus a generous buffer
+  // for retries and network jitter. Beyond this, a stranded spinner is
+  // strictly worse than a quiet chat — the user can re-send the
+  // message and try again.
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    const MAX_TYPING_MS = 6 * 60 * 1000;
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const stale: string[] = [];
+      for (const [researchId, startedAt] of pendingTypingStartedRef.current) {
+        if (now - startedAt > MAX_TYPING_MS) stale.push(researchId);
+      }
+      if (stale.length === 0) return;
+      for (const id of stale) pendingTypingStartedRef.current.delete(id);
+      setPendingMessageResearchIds((prev) => {
+        let mutated = false;
+        const next = new Set(prev);
+        for (const id of stale) {
+          if (next.delete(id)) mutated = true;
+        }
+        return mutated ? next : prev;
+      });
+    }, 30 * 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // -------------------------------------------------------------------------
   // Derived selectors (only valid once state is loaded)
@@ -1392,12 +1435,15 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
     // Mark this research as having a reply in flight. The chat column
     // shows the typing bubble until either the response lands with
     // `agentReplyExpected: false` or the agent's first message arrives
-    // (cleared inside the Realtime handler above).
+    // (cleared inside the Realtime handler above). The timestamp is
+    // also recorded so the sweep effect can self-heal a stranded
+    // spinner if the Realtime INSERT is dropped.
     setPendingMessageResearchIds((prev) => {
       const next = new Set(prev);
       next.add(targetResearchId);
       return next;
     });
+    pendingTypingStartedRef.current.set(targetResearchId, Date.now());
 
     try {
       const res = await trackedFetch('/api/messages', {
@@ -1477,6 +1523,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
           next.delete(targetResearchId);
           return next;
         });
+        pendingTypingStartedRef.current.delete(targetResearchId);
       }
     } catch (err) {
       // Drop the typing bubble; the optimistic row is rolled back
@@ -1487,6 +1534,7 @@ export function useWorkspace(opts: UseWorkspaceOptions = {}): UseWorkspaceResult
         next.delete(targetResearchId);
         return next;
       });
+      pendingTypingStartedRef.current.delete(targetResearchId);
       throw err;
     }
   }, []);
