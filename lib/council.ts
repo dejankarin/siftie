@@ -51,7 +51,7 @@ import { COUNCIL_MODELS, generateJson, type CouncilModelId } from './openrouter'
  * breadth of opinion, not depth of deliberation.
  *
  * Note: this used to be 3-vs-4 when the lineup had four reasoning-
- * model seats. We dropped to a 3-model fast demo lineup (see
+ * model seats. We dropped to a 3-model fast lineup (see
  * `COUNCIL_MODELS` in `lib/openrouter.ts`) so the depth ratio
  * shifted with it. Keep these in sync if the lineup changes again.
  */
@@ -218,7 +218,7 @@ export async function runCouncil(
 
   // Pick the Chair model: prefer the strongest reasoning model
   // available. We use the first model in COUNCIL_MODELS (gpt-5.4-mini
-  // in the demo lineup) by convention — same family as the Ideate
+  // in the fast lineup) by convention — same family as the Ideate
   // primary, so the Chair runs the exact reasoning lineage that
   // produced the candidate prompts. This is OK to leak in the system
   // prompt — there is no peer above the Chair to defer to.

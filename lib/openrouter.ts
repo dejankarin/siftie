@@ -40,15 +40,15 @@ import { withResilience } from './resilience';
  * and we have one source of truth. If a model id 404s on OpenRouter we
  * change it here and every reviewer picks it up.
  *
- * **Demo lineup (3 fast models, one per major vendor).** Earlier drafts
+ * **Fast lineup (3 models, one per major vendor).** Earlier drafts
  * of the plan used a 4-seat lineup with the strongest reasoning model
  * from each vendor (gpt-5.4 / gemini-3.1-pro / claude-opus-4.5 / grok-4),
  * but the full deliberation was so slow (~60–90s end-to-end) that the
- * Council read like a backend job rather than a live agent. For the
- * demo we trade a little reasoning depth for ~3–5x faster wall-clock
- * by routing every seat to a "flash"-tier sibling of the original
- * model. Three vendors is enough to prove the cross-model disagreement
- * thesis; we can scale back up to 4 strong reviewers later.
+ * Council read like a backend job rather than a live agent. We trade
+ * a little reasoning depth for ~3–5x faster wall-clock by routing
+ * every seat to a "flash"-tier sibling of the original model. Three
+ * vendors is enough to prove the cross-model disagreement thesis; we
+ * can scale back up to 4 strong reviewers later.
  *
  * Order matters: the first 2 are the "quick" depth, all 3 are
  * "standard" depth. See `lib/council.ts` for selection.
@@ -63,7 +63,7 @@ export const COUNCIL_MODELS = [
   // context window. We deliberately do NOT use a Gemini 3.x model
   // here: the 3-series flagship reasoning models loop on low temps
   // through OpenRouter (see `isReasoningModel` below) and Flash 2.5
-  // hits the speed/quality balance we want for the demo.
+  // hits the speed/quality balance we want for the live agent.
   // https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash
   'google/gemini-2.5-flash',
   // Anthropic's Claude Haiku 4.5 — the smallest 4.x sibling of
@@ -76,7 +76,7 @@ export type CouncilModelId = (typeof COUNCIL_MODELS)[number];
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 /**
- * Hard timeout per call. The demo lineup is intentionally fast — gpt-5.4-
+ * Hard timeout per call. The fast lineup is intentionally fast — gpt-5.4-
  * mini, gemini-2.5-flash and claude-haiku-4.5 all comfortably finish a
  * Council reviewer call in well under 30s — but reasoning effort, retry
  * jitter, and OpenRouter's own queueing can spike, so we keep a 60s

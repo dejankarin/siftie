@@ -8,7 +8,7 @@ A three-column research workspace (Sources / Chat / Prompts) that turns brand so
 
 ## Status
 
-Built and deployed in 48-hour sprints, tracked as nine "sessions". As of **commit `ab7546d`**:
+Built and deployed in nine iterative sprints (Sessions 1–9). As of **commit `ab7546d`**:
 
 | Session | What | Status |
 |---|---|---|
@@ -24,13 +24,13 @@ Built and deployed in 48-hour sprints, tracked as nine "sessions". As of **commi
 | —   | Deep-link routing `/app/[projectId]/[researchId]` + `sources` Realtime sync | Shipped |
 | 7 | Prompts column live (dynamic HitsBar, Show-all drawer, CSV export) | Shipped |
 | 8 | Reply router (Tavily web search) + landing polish + mobile pass | Shipped |
-| 9 | Demo prep — PostHog Siftie Live dashboard (4 live tiles), 2 LLM Analytics evals (Chair llm-judge + ContextDoc hog), cluster view, judge Q&A in README | Shipped (analytics) — real-brand end-to-end demo run + 3-min screen recording still pending |
+| 9 | Operational observability — PostHog Siftie Live dashboard (4 live tiles), 2 LLM Analytics evals (Chair LLM-judge + ContextDoc hog), cluster view, FAQ in README | Shipped |
 
 Beyond the original plan, the following also shipped:
 
 - **OpenAI Platform direct** as the Ideate primary (GPT-5.4) with Gemini Flash fallback, plus an OpenAI fallback for source ingestion when Gemini Flash is unavailable. Independent of OpenRouter so users can use their existing OpenAI billing.
-- **3-model fast Council demo lineup** — the original plan called for a 4-seat all-frontier Council (`gpt-5.4` + `gemini-3.1-pro-preview` + `claude-opus-4.5` + `grok-4`) but the full deliberation took ~60–90s end-to-end, which made the live agent feel like a backend job instead of a real-time collaborator. Swapped to **`openai/gpt-5.4-mini`** + **`google/gemini-2.5-flash`** + **`anthropic/claude-haiku-4.5`** — one fast tier per major vendor, ~3–5x faster wall-clock, still proves the cross-vendor disagreement thesis. `REVIEWER_COUNT_BY_DEPTH` shifted from `{ quick: 3, standard: 4 }` to `{ quick: 2, standard: 3 }` to keep the depth lever; the OpenRouter per-call timeout dropped from 90s → 60s. The first seat (`gpt-5.4-mini`) doubles as the synthesis Chair, same family as the Ideate primary so the Chair runs the exact reasoning lineage that produced the candidate prompts. Easy to scale back up to 4 frontier reviewers later — it's a single edit to `COUNCIL_MODELS` in `lib/openrouter.ts` (the DB constraint already allows seats 1–4).
-- **Stoppable research runs (Session 6.5)** — soft cancellation via `runs.status='cancelling'` polled by the orchestrator between stages; the chat narrates the stop and the prompts column reflects it without a reload.
+- **3-model fast Council lineup** — the original plan called for a 4-seat all-frontier Council (`gpt-5.4` + `gemini-3.1-pro-preview` + `claude-opus-4.5` + `grok-4`) but the full deliberation took ~60–90s end-to-end, which made the live agent feel like a backend job instead of a real-time collaborator. Swapped to **`openai/gpt-5.4-mini`** + **`google/gemini-2.5-flash`** + **`anthropic/claude-haiku-4.5`** — one fast tier per major vendor, ~3–5x faster wall-clock, still proves the cross-vendor disagreement thesis. `REVIEWER_COUNT_BY_DEPTH` shifted from `{ quick: 3, standard: 4 }` to `{ quick: 2, standard: 3 }` to keep the depth lever; the OpenRouter per-call timeout dropped from 90s → 60s. The first seat (`gpt-5.4-mini`) doubles as the synthesis Chair, same family as the Ideate primary so the Chair runs the exact reasoning lineage that produced the candidate prompts. Easy to scale back up to 4 frontier reviewers later — it's a single edit to `COUNCIL_MODELS` in `lib/openrouter.ts` (the DB constraint already allows seats 1–4).
+- **Stoppable research runs (Session 6.5)** — soft cancellation via `cancelRun()` flipping `runs.status` to `'failed'` (no dedicated `cancelling` enum — saves a Supabase migration; the cancel chat bubble carries the user-facing semantics). The orchestrator polls `isRunCancelled()` between stages and exits early; the chat narrates the stop and the prompts column reflects it without a reload.
 - **Markdown report download (Session 6.6)** — `GET /api/research/[runId]/report` streams a comprehensive Markdown export (TL;DR via Gemini Flash, run metadata, sources table, prompt portfolio with per-prompt Chair rationales, full Council transcript) wired to the **Download report** button at the bottom of the prompts column.
 - **Deep-link routing** — `/app/[projectId]/[researchId]` server route validates ownership in one query and falls back to `redirect('/app')` on mismatch (no information leak). The client keeps URL ⇄ active-pair in sync bidirectionally so the browser back button walks recent research switches naturally.
 - **`sources` Realtime sync** — third `postgres_changes` handler (alongside `messages` and `runs`) on the same Supabase channel keeps the sources column consistent across multiple tabs of the same workspace, with insert/update/delete coverage and dedupe against the local optimistic-swap path.
@@ -45,7 +45,7 @@ Beyond the original plan, the following also shipped:
 - **Session 8 reply router** — `lib/reply-router.ts` runs Gemini 3 Flash with structured output to classify every non-first chat message into `chat_only` / `refine_prompts` / `rebaseline` / `run_research` / `web_search`. The `web_search` branch fans out to `lib/tavily.ts#searchWeb` + a second Gemini summariser (`summariseSearchHits`) that writes a 2–4 sentence reply with inline `[n]` citations and a Markdown `Sources:` footer. `POST /api/messages` returns the lead-in agent reply immediately and runs all side effects (web search summary, `runResearchPipeline` for `run_research` / `rebaseline`) behind `waitUntil`, with follow-up bubbles arriving via Supabase Realtime. PostHog events: `reply_router_decision`, `reply_router_failed`, `reply_router_websearch_completed`, `reply_router_websearch_failed`, `reply_router_run_research_failed` — all carry `$ai_trace_id` so they correlate with the `$ai_generation` events in LLM Analytics. Defensive: when Gemini returns `web_search` but the user has no Tavily key, the router downgrades to `chat_only` so the user always gets a reply.
 - **Session 8 landing page** — `app/page.tsx` is a server component (Clerk `auth()` redirects signed-in users to `/app`) with sticky nav (logo + theme toggle + Log in + Sign up), a hero (badge, headline, tagline, primary CTA, BYOK reassurance), a three-step value-prop grid (Add sources → Chat with the agent → Get a tested portfolio), and a token-driven HTML mock of the 3-column workspace that swaps with the theme toggle so it never goes stale relative to the real app.
 - **Session 8 mobile pass** — `AddSourceModal` switched to a flex-column with `max-h-[calc(100dvh-2rem)]` + scrollable body so the Cancel/Add buttons stay anchored on landscape phones; `MobileTopBar` placeholder "More" button replaced with the real Clerk `<UserButton />` (with the API Keys link mirroring desktop); mobile `<main>` padding bumped to `pb-[calc(58px+env(safe-area-inset-bottom))]` so the chat composer clears the iPhone home indicator; `MobileTabBar` tab buttons gain `aria-current` + visible focus styling; `ChatColumn` composer wrapper uses `focus-within:shadow-[0_0_0_3px_var(--focus-ring)]` and the Send button gains `focus-visible:ring`.
-- **Session 9 demo prep** — provisioned the **Siftie Live** PostHog dashboard with four live tiles (sign-up funnel, runs/day succeed-vs-fail, avg LLM cost per run, top brand-category clusters) plus two automatic LLM Analytics evaluations: an **LLM-judge** that scores every `tag: council_chair` `$ai_generation` against a 5-criterion rubric (≥6 picks, substantive summary, meaningful `councilNote` rationales, topical diversity, schema validity) and a **deterministic Hog eval** that validates every `tag: context_doc` `$ai_generation` against the production `ContextDoc` schema (title + ≥50-char summary + ≥3 topics + ≥1 entity + ≥3 facts + rawExcerpt). Both evals enabled in production; the cluster tile rides the existing `Default - generations` LLM Analytics clustering job. See **Demo dashboard & evals** below for URLs and the **Demo / Judge Q&A** section for talking points.
+- **Session 9 operational observability** — provisioned the **Siftie Live** PostHog dashboard with four live tiles (sign-up funnel, runs/day succeed-vs-fail, avg LLM cost per run, top brand-category clusters) plus two automatic LLM Analytics evaluations: an **LLM-judge** that scores every `tag: council_chair` `$ai_generation` against a 5-criterion rubric (≥6 picks, substantive summary, meaningful `councilNote` rationales, topical diversity, schema validity) and a **deterministic Hog eval** that validates every `tag: context_doc` `$ai_generation` against the production `ContextDoc` schema (title + ≥50-char summary + ≥3 topics + ≥1 entity + ≥3 facts + rawExcerpt). Both evals enabled in production; the cluster tile rides the existing `Default - generations` LLM Analytics clustering job. See **Observability dashboard & evals** below for URLs and the **FAQ** section for context on the design decisions.
 
 ## Run locally
 
@@ -83,7 +83,7 @@ Other scripts:
 | Interview questions | `gemini-3-flash-preview` | Gemini API | First six gap-attributed questions per research. |
 | **Ideate (primary)** | **`gpt-5.4`** | **OpenAI Platform** | ~24 candidate prompts, structured output via `response_format: json_schema`, reasoning model with `reasoning_effort: 'low'`. |
 | Ideate (fallback) | `gemini-3-flash-preview` | Gemini API | `ThinkingLevel.MEDIUM`. |
-| Council reviewers | `openai/gpt-5.4-mini`, `google/gemini-2.5-flash`, `anthropic/claude-haiku-4.5` | OpenRouter | Demo lineup: 3 fast models, one per major vendor — chosen so the live agent feels snappy (~3–5x faster end-to-end vs. an all-frontier lineup) while still proving cross-vendor disagreement. Anonymised seats 1–3. Every run uses Standard depth (all 3 reviewers); no user-facing depth selector. |
+| Council reviewers | `openai/gpt-5.4-mini`, `google/gemini-2.5-flash`, `anthropic/claude-haiku-4.5` | OpenRouter | Fast lineup: 3 models, one per major vendor — chosen so the live agent feels snappy (~3–5x faster end-to-end vs. an all-frontier lineup) while still proving cross-vendor disagreement. Anonymised seats 1–3. Every run uses Standard depth (all 3 reviewers); no user-facing depth selector. |
 | Council Chair | `openai/gpt-5.4-mini` | OpenRouter | First seat doubles as the synthesis Chair (same family as the Ideate primary), with per-prompt `councilNote`. |
 
 **Web layer:** Tavily (`@tavily/core`) — `extract` for URL ingestion, `search` reserved for the Session 8 reply router action.
@@ -123,10 +123,10 @@ Other scripts:
                                 web_search     → waitUntil(searchWeb + summarise)
   /api/research             → Ideate (GPT-5.4 → Gemini Flash fallback)
                               → [Peec baseline if key]
-                              → Council (3 OpenRouter models, 3 stages, anonymised — demo lineup)
+                              → Council (3 OpenRouter models, 3 stages, anonymised — fast lineup)
                               → Chair synthesis
                               → runs row + chat bubbles via Realtime
-  /api/research/cancel      → flip status='cancelling'; orchestrator polls between stages
+  /api/research/cancel      → cancelRun() flips status='failed'; orchestrator polls isRunCancelled() between stages
   /api/research/[id]/report → Gemini Flash TL;DR + Markdown export (sources, prompts, transcript)
   /api/research/[id]/export → CSV export of the prompt portfolio (UTF-8 BOM + CRLF, Excel-friendly)
   /api/runs/[id]/refresh-hits → re-run the Peec brand baseline for the run and update every prompt's hits
@@ -162,7 +162,7 @@ app/
     sources/route.ts + [id]/route.ts + [id]/reindex/route.ts
     messages/route.ts         POST user reply (also generates first-six interview questions)
     research/route.ts         POST start a research run (returns 202, work runs in waitUntil)
-    research/cancel/route.ts  POST flip a running run to status='cancelling' (orchestrator polls between stages)
+    research/cancel/route.ts  POST cancelRun() flips a running run to status='failed' (orchestrator polls isRunCancelled() between stages)
     research/[runId]/report/route.ts  GET stream a Markdown report for a completed run
     research/[runId]/export/route.ts  GET stream a CSV of the prompt portfolio (UTF-8 BOM + CRLF)
     runs/[runId]/refresh-hits/route.ts  POST re-run the Peec brand baseline for the run and update every prompt's hits
@@ -191,7 +191,7 @@ lib/
   research/schema.ts          Zod schemas for IdeatePrompt, ReviewerVerdict, ChairPick, FinalPrompt
   research.ts                 Top-level orchestrator (Ideate → Peec → Council → Surface), polls for soft cancellation
   resilience.ts               Shared withResilience helper (timeouts, retries, abort rules)
-  runs.ts                     Run lifecycle (createRun, completeRun, failRun, getLatestRunByResearch, getRunForOwner, requestRunCancel, updateRunPrompts)
+  runs.ts                     Run lifecycle (createRun, completeRun, failRun, getLatestRunByResearch, getRunForOwner, cancelRun, isRunCancelled, updateRunPrompts)
   sources.ts                  Source persistence + listing
   supabase/                   Supabase clients (server with Clerk JWT; browser with public anon)
   tavily.ts                   Tavily wrapper (extract, search — used by the Session 8 reply router for web_search actions)
@@ -240,7 +240,7 @@ Schema overview (all RLS-scoped on Clerk user id):
 - `user_profiles` — one row per Clerk user; carries `posthog_capture_llm` (default `true`).
 - `user_api_keys` — encrypted BYOK keys per `(clerk_user_id, provider)`. Providers: `openai`, `gemini`, `openrouter`, `tavily`, `peec`.
 - `projects` → `researches` → `sources` / `messages` / `runs`.
-- `messages.council_role` (`reviewer | chair`) + `messages.council_seat` (1–3 in the demo lineup; DB allows 1–4) replay anonymised Council bubbles on refresh.
+- `messages.council_role` (`reviewer | chair`) + `messages.council_seat` (1–3 in the fast lineup; DB allows 1–4) replay anonymised Council bubbles on refresh.
 - `runs` — one per research run; stores `prompts` JSONB, `channels` JSONB (Peec model channels surfaced for this run, used by the dynamic HitsBar tooltips), `total_channels`, `peec_skipped`, `council_depth`, `status`.
 - Realtime publication: `sources`, `messages`, `runs`.
 
@@ -253,7 +253,7 @@ Settings → Privacy exposes a single toggle that maps to `user_profiles.posthog
 
 Either way, we **never** capture decrypted provider keys, raw uploaded files, email, or name.
 
-## Demo dashboard & evals
+## Observability dashboard & evals
 
 PostHog project **Siftie** (id 166503) on **eu.posthog.com**. Provisioned via the PostHog MCP, all wired to events the app already emits (no extra instrumentation).
 
@@ -263,7 +263,7 @@ PostHog project **Siftie** (id 166503) on **eu.posthog.com**. Provisioned via th
 |---|---|---|---|
 | [Sign-up funnel](https://eu.posthog.com/project/166503/insights/oWRC6dKj) | Funnel (4 steps, 14-day window) | `$pageview /` → `$pageview /sign-up` → `key_added (provider=gemini)` → `research_run_complete` | Acquisition: how many landing visitors actually finish a research run. |
 | [Research runs per day (succeeded vs. failed)](https://eu.posthog.com/project/166503/insights/4wBsqnk7) | Trends (stacked bar, `day` interval, 14d) | `research_run_complete` + `research_run_failed` events from `lib/research.ts` | Headline reliability number — the success/failure ratio is the most important signal after the 3-model fast Council swap. |
-| [Avg LLM cost per research run (USD)](https://eu.posthog.com/project/166503/insights/iFQOAixL) | HogQL line graph | `avg(sum($ai_total_cost_usd))` grouped by `$ai_trace_id` (= one Siftie run; set in `lib/openrouter.ts`) and bucketed by day | Economics: validates the swap to the fast Council didn't blow the per-run budget. Demo target ≪ $0.10/run. |
+| [Avg LLM cost per research run (USD)](https://eu.posthog.com/project/166503/insights/iFQOAixL) | HogQL line graph | `avg(sum($ai_total_cost_usd))` grouped by `$ai_trace_id` (= one Siftie run; set in `lib/openrouter.ts`) and bucketed by day | Economics: validates the swap to the fast Council keeps the per-run budget under control. Target ≪ $0.10/run. |
 | [Top brand categories (LLM Analytics clusters)](https://eu.posthog.com/project/166503/insights/epdsd3d2) | HogQL table | Latest `Default - generations` `$ai_generation_clusters` event, unrolled via `arrayJoin(JSONExtractArrayRaw($ai_clusters))` | Topic mix across every Siftie LLM call (ideate prompts, context docs, council reviews). For interactive drill-down: [LLM Analytics → Clusters](https://eu.posthog.com/project/166503/llm-analytics/clusters). |
 
 **Evaluations** (both auto-run on every matching `$ai_generation` event; results land as `$ai_evaluation` events):
@@ -280,9 +280,9 @@ The Hog eval was test-driven against five real production events first via `eval
 > 1. **Provider key for the Chair eval.** The LLM-judge runs on PostHog's infrastructure, not Siftie's, so it needs its own key. Add a Gemini key under [eu.posthog.com → Settings → Provider keys](https://eu.posthog.com/project/166503/settings/environment#provider-keys) (or swap the eval to OpenRouter / OpenAI in the eval definition).
 > 2. **Cluster tile populates on next clustering run.** PostHog runs the default clustering jobs on a schedule; the table is empty until the first `Default - generations` job sees enough $ai_generation events. As traffic grows it fills in automatically.
 
-## Demo / Judge Q&A
+## FAQ
 
-Three questions every judge tends to ask, with the honest answer:
+Three questions that come up most often, with honest answers:
 
 **Q1 · Why a 3-model "fast" Council instead of all-frontier reviewers?**
 A 4-seat all-frontier Council (`gpt-5.4` + `gemini-3.1-pro-preview` + `claude-opus-4.5` + `grok-4`) was spec'd in the original plan, and we shipped it through Session 6. End-to-end it ran ~60–90s per research, which made the live agent feel like a backend job instead of a real-time collaborator. We swapped to **`openai/gpt-5.4-mini`** + **`google/gemini-2.5-flash`** + **`anthropic/claude-haiku-4.5`** — one fast tier per major vendor, ~3–5× faster wall-clock, still proves the cross-vendor disagreement thesis. The Chair stays in the OpenAI family (`gpt-5.4-mini`) so it shares reasoning lineage with the Ideate primary. Going back to the frontier lineup is a one-line edit to `COUNCIL_MODELS` in `lib/openrouter.ts`; the DB constraint already permits seats 1–4. The [avg-cost tile](https://eu.posthog.com/project/166503/insights/iFQOAixL) on the dashboard quantifies the trade-off in dollars per run.

@@ -54,7 +54,7 @@ export interface Message {
   pending?: boolean;
   /** Reserved for Session 6 council bubbles — anonymised reviewer / chair label. */
   councilRole?: 'reviewer' | 'chair' | null;
-  /** Council bubble seat number (1..3 for the demo lineup; up to 1..4
+  /** Council bubble seat number (1..3 for the fast lineup; up to 1..4
    *  if the lineup is ever scaled back up — DB constraint allows it). */
   councilSeat?: number | null;
   /** Reserved for Session 6 — links message to the run that produced it. */
