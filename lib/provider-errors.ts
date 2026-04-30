@@ -143,7 +143,7 @@ function providerLabel(provider: ProviderName): string {
     case 'openrouter':
       return 'OpenRouter';
     case 'peec':
-      return 'PEEC';
+      return 'Peec';
   }
 }
 

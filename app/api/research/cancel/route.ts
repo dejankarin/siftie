@@ -54,7 +54,7 @@ export const POST = withUser(async ({ userId }, req) => {
     await createMessage(userId, {
       researchId: result.researchId,
       role: 'agent',
-      body: 'Run cancelled. The Council has been stopped — hit Run research when you want another pass.',
+      body: 'Run cancelled. The Council has been stopped — hit Retry research when you want another pass.',
       runId,
     }).catch((err) => {
       // Best-effort: the run is already `failed`, so a missed bubble

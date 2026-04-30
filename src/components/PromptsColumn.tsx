@@ -781,7 +781,7 @@ export function PromptsColumn({
         )}
         {runStatus === 'failed' && (
           <div className="mt-2 px-3 py-2 rounded-xl border border-[var(--line)] bg-[var(--surface-2)] text-[11.5px] text-[var(--ink-2)]">
-            Last run failed — check the chat for details and retry.
+            Last run didn&rsquo;t finish &mdash; see the chat for details, then hit Retry research.
           </div>
         )}
 

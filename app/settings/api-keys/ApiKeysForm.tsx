@@ -38,7 +38,7 @@ const PROVIDER_META: Record<Provider, {
   openrouter: {
     label: 'OpenRouter',
     required: true,
-    caption: 'Routes Council seats to Claude Sonnet, GPT-5, DeepSeek, and Llama.',
+    caption: 'Routes Council seats to GPT-5.4 Mini, Gemini 2.5 Flash, and Claude Haiku 4.5.',
     helpUrl: 'https://openrouter.ai/keys',
     helpText: 'Get a key from OpenRouter',
   },

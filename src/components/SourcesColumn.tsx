@@ -55,7 +55,7 @@ function AddMenu({ onPick }: { onPick: (tab: AddTab) => void }) {
     { id: 'pdf', label: 'Upload PDF', hint: 'Research decks, reports, briefs' },
     { id: 'url', label: 'Paste URL', hint: 'Site, article, brand' },
     { id: 'doc', label: 'Upload Word doc', hint: 'DOC or DOCX files' },
-    { id: 'md', label: 'Upload .md', hint: 'Markdown notes or docs' },
+    { id: 'md', label: 'Paste Markdown', hint: 'Paste notes, briefs, or docs' },
   ];
 
   return (

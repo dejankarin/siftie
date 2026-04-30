@@ -209,7 +209,11 @@ function AppContent({ ws, saveStatus }: { ws: UseWorkspaceResult; saveStatus: Sa
           showToast(`Missing ${maybe.provider ?? 'provider'} key`);
           window.location.href = '/settings/api-keys?onboarding=1';
         } else {
-          showToast('Source failed');
+          // postSource() preserves the server's `message` (and trims it) on
+          // the thrown error, so surfacing it gives the toast real context
+          // instead of a generic "Source failed" — the modal stays open
+          // with the same message either way.
+          showToast(maybe.message || 'Source failed');
         }
         throw err;
       }
@@ -401,6 +405,7 @@ function AppContent({ ws, saveStatus }: { ws: UseWorkspaceResult; saveStatus: Sa
                 isTyping={isTyping}
                 sourcesCount={sources.length}
                 analyzing={analyzing}
+                runStatus={ws.activeResearch.runStatus}
               />
             </div>
             <div className="col-card overflow-hidden flex flex-col min-h-0">
@@ -457,6 +462,7 @@ function AppContent({ ws, saveStatus }: { ws: UseWorkspaceResult; saveStatus: Sa
                   isTyping={isTyping}
                   sourcesCount={sources.length}
                   analyzing={analyzing}
+                  runStatus={ws.activeResearch.runStatus}
                 />
               </div>
             )}

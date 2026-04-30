@@ -124,9 +124,42 @@ export interface ChatColumnProps {
   isTyping: boolean;
   sourcesCount: number;
   analyzing: boolean;
+  runStatus: 'pending' | 'running' | 'complete' | 'failed' | null | undefined;
 }
 
 const SESSION_DATE = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date());
+
+/**
+ * Header subtext that reflects what's actually happening rather than a
+ * canned "Active · analyzing N sources" string. The order matters: an
+ * in-flight ingest takes precedence over an idle run state, and a
+ * running Council takes precedence over the most-recent run's outcome.
+ * `failed` covers both genuine failures and user-cancellations (they
+ * share a `runs.status` value), so the copy stays neutral and points
+ * the user to the chat for the per-bubble explanation.
+ */
+function chatSubtext({
+  sourcesCount,
+  analyzing,
+  runStatus,
+}: {
+  sourcesCount: number;
+  analyzing: boolean;
+  runStatus: ChatColumnProps['runStatus'];
+}): string {
+  if (sourcesCount === 0) return 'Add sources to begin';
+  if (analyzing) return 'Indexing source…';
+  if (runStatus === 'pending' || runStatus === 'running') {
+    return `Council deliberating · ${sourcesCount} ${sourcesCount === 1 ? 'source' : 'sources'}`;
+  }
+  if (runStatus === 'complete') {
+    return `Last run complete · ${sourcesCount} ${sourcesCount === 1 ? 'source' : 'sources'}`;
+  }
+  if (runStatus === 'failed') {
+    return `Last run didn't finish · ${sourcesCount} ${sourcesCount === 1 ? 'source' : 'sources'}`;
+  }
+  return `Ready · ${sourcesCount} ${sourcesCount === 1 ? 'source' : 'sources'}`;
+}
 
 export function ChatColumn({
   messages,
@@ -134,6 +167,7 @@ export function ChatColumn({
   isTyping,
   sourcesCount,
   analyzing,
+  runStatus,
 }: ChatColumnProps) {
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -172,7 +206,9 @@ export function ChatColumn({
           <div>
             <h2 className="text-[15px] font-semibold tracking-tight text-[var(--ink)]">Chat</h2>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="text-[11.5px] text-[var(--ink-3)]">Active · analyzing {sourcesCount} sources</span>
+              <span className="text-[11.5px] text-[var(--ink-3)]">
+                {chatSubtext({ sourcesCount, analyzing, runStatus })}
+              </span>
             </div>
           </div>
         </div>
@@ -206,12 +242,12 @@ export function ChatColumn({
           />
           <div className="flex items-center justify-between mt-2">
             <div className="flex items-center gap-1">
-              <button type="button" className="btn-ghost px-2 py-1 text-[11.5px] text-[var(--ink-3)] hover:text-[var(--ink)]">
-                Attach
-              </button>
-              <button type="button" className="btn-ghost px-2 py-1 text-[11.5px] text-[var(--ink-3)] hover:text-[var(--ink)]">
-                {sourcesCount} sources
-              </button>
+              <span
+                className="px-2 py-1 text-[11.5px] text-[var(--ink-3)]"
+                aria-label={`${sourcesCount} ${sourcesCount === 1 ? 'source' : 'sources'} in scope`}
+              >
+                {sourcesCount} {sourcesCount === 1 ? 'source' : 'sources'} in scope
+              </span>
             </div>
             <button
               type="button"
