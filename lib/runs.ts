@@ -124,21 +124,31 @@ export interface CompleteRunInput {
  * No ownership check — `runId` was returned by `createRun` which
  * already verified ownership. (We rely on the orchestrator owning its
  * own runId; nothing else has it.)
+ *
+ * Returns false if the run is no longer active. This closes the
+ * cancel/complete race: a user-initiated cancel flips the row to
+ * `failed`, and a late completion must not overwrite that terminal
+ * state with `complete`.
  */
-export async function completeRun(runId: string, input: CompleteRunInput): Promise<void> {
+export async function completeRun(runId: string, input: CompleteRunInput): Promise<boolean> {
   const supabase = createServiceRoleSupabaseClient();
-  const { error } = await supabase
+  const { error, count } = await supabase
     .from('runs')
-    .update({
-      status: 'complete',
-      prompts: input.prompts,
-      total_channels: input.totalChannels,
-      peec_skipped: input.peecSkipped,
-      channels: input.channels,
-      finished_at: new Date().toISOString(),
-    })
-    .eq('id', runId);
+    .update(
+      {
+        status: 'complete',
+        prompts: input.prompts,
+        total_channels: input.totalChannels,
+        peec_skipped: input.peecSkipped,
+        channels: input.channels,
+        finished_at: new Date().toISOString(),
+      },
+      { count: 'exact' },
+    )
+    .eq('id', runId)
+    .in('status', ['running', 'pending']);
   if (error) throw error;
+  return count === 1;
 }
 
 /**
@@ -176,21 +186,30 @@ export async function updateRunPrompts(
 }
 
 /**
- * Mark a run as failed. We deliberately don't write the partial prompts
- * here — failed runs leave the prompts column showing the previous
- * successful run's data, which is more useful to the user than an
- * empty/half-baked portfolio.
+ * Mark an active run as failed. We deliberately don't write the partial
+ * prompts here — failed runs leave the prompts column showing the
+ * previous successful run's data, which is more useful to the user than
+ * an empty/half-baked portfolio.
+ *
+ * Returns false if the run is already terminal. That prevents a
+ * post-completion side effect (for example, the final chat bubble
+ * insert) from incorrectly downgrading a completed portfolio to failed.
  */
-export async function failRun(runId: string): Promise<void> {
+export async function failRun(runId: string): Promise<boolean> {
   const supabase = createServiceRoleSupabaseClient();
-  const { error } = await supabase
+  const { error, count } = await supabase
     .from('runs')
-    .update({
-      status: 'failed',
-      finished_at: new Date().toISOString(),
-    })
-    .eq('id', runId);
+    .update(
+      {
+        status: 'failed',
+        finished_at: new Date().toISOString(),
+      },
+      { count: 'exact' },
+    )
+    .eq('id', runId)
+    .in('status', ['running', 'pending']);
   if (error) throw error;
+  return count === 1;
 }
 
 /**
@@ -233,18 +252,21 @@ export async function cancelRun(
     return { cancelled: false, researchId: existing.research_id };
   }
 
-  const { error } = await supabase
+  const { error, count } = await supabase
     .from('runs')
-    .update({
-      status: 'failed',
-      finished_at: new Date().toISOString(),
-    })
+    .update(
+      {
+        status: 'failed',
+        finished_at: new Date().toISOString(),
+      },
+      { count: 'exact' },
+    )
     .eq('id', runId)
     // Guard against the orchestrator finishing between the read and the
     // write — only flip if it's still running/pending.
     .in('status', ['running', 'pending']);
   if (error) throw error;
-  return { cancelled: true, researchId: existing.research_id };
+  return { cancelled: count === 1, researchId: existing.research_id };
 }
 
 /**
