@@ -503,12 +503,18 @@ export async function runResearchPipeline(
       } satisfies FinalPrompt;
     });
 
-    await completeRun(runId, {
+    const completed = await completeRun(runId, {
       prompts: finalPrompts,
       totalChannels,
       peecSkipped,
       channels: runChannels,
     });
+    if (!completed) {
+      // Stop can land after the final cancellation poll but before the
+      // completion write. Treat that as a real cancellation winner so
+      // we do not append a misleading success bubble or analytics event.
+      throw new RunCancelledError();
+    }
 
     await emitAgentMessage(clerkUserId, researchId, runId, {
       body: `Done — ${finalPrompts.length} prompts in your portfolio. Open "Show all" in the Prompts column for the full Chair rationale.`,
@@ -895,7 +901,15 @@ async function failRunWithRetry(runId: string, researchId: string): Promise<bool
   const MAX_ATTEMPTS = 3;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      await failRun(runId);
+      const persisted = await failRun(runId);
+      if (!persisted) {
+        log.info('research.run.fail_skipped_terminal', {
+          run_id: runId,
+          research_id: researchId,
+          attempt,
+        });
+        return false;
+      }
       if (attempt > 1) {
         log.info('research.run.fail_persisted_after_retry', {
           run_id: runId,
